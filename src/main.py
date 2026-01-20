@@ -6,18 +6,25 @@ Entry point for the application.
 
 from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
+from src.commit_parser import parse_commit_events
 
 
-def format_event(event: dict) -> str:
-    """Format a GitHub event for display."""
-    event_type = event.get("type", "Unknown")
-    repo = event.get("repo", {}).get("name", "unknown")
-    created_at = event.get("created_at", "")[:10]  # Just the date part
+def format_commit_event(commit_event: dict) -> str:
+    """Format a parsed commit event for display."""
+    date = commit_event["date"]
+    repo = commit_event["repo"]
+    commit_count = commit_event["commit_count"]
 
-    # Make event types more readable
-    type_display = event_type.replace("Event", "")
+    # Get first commit message if available
+    commits = commit_event.get("commits", [])
+    first_message = commits[0]["message"] if commits else "No commit message"
 
-    return f"  {created_at}  {type_display:<20} {repo}"
+    # Truncate long messages
+    if len(first_message) > 50:
+        first_message = first_message[:47] + "..."
+
+    plural = "commit" if commit_count == 1 else "commits"
+    return f"  {date}  {commit_count} {plural:<10} {repo:<30} {first_message}"
 
 
 def main():
@@ -36,18 +43,25 @@ def main():
 
     try:
         print(f"\nFetching recent activity for {GITHUB_USERNAME}...\n")
-        events = client.get_user_events(per_page=10)
+        events = client.get_user_events(per_page=30)
 
         if not events:
             print("No recent events found.")
             return 0
 
-        print(f"Found {len(events)} recent events:\n")
-        print("  DATE        TYPE                 REPOSITORY")
-        print("  " + "-" * 46)
+        # Parse commit events
+        commit_events = parse_commit_events(events)
 
-        for event in events:
-            print(format_event(event))
+        if not commit_events:
+            print("No commit events found in recent activity.")
+            return 0
+
+        print(f"Found {len(commit_events)} commit events:\n")
+        print("  DATE        COMMITS    REPOSITORY                     MESSAGE")
+        print("  " + "-" * 80)
+
+        for commit_event in commit_events:
+            print(format_commit_event(commit_event))
 
         print()
 
