@@ -131,6 +131,31 @@ def display_calendar(
     print()
 
 
+def display_stats(stats: dict) -> None:
+    """
+    Display commit statistics to the console.
+
+    Args:
+        stats: Dictionary from calculate_stats() containing:
+            - commits_today: int
+            - commits_this_week: int
+            - commits_this_month: int
+    """
+    today = stats["commits_today"]
+    week = stats["commits_this_week"]
+    month = stats["commits_this_month"]
+
+    today_label = "commit" if today == 1 else "commits"
+    week_label = "commit" if week == 1 else "commits"
+    month_label = "commit" if month == 1 else "commits"
+
+    print("📊 Commit Stats:")
+    print(f"   Today:      {today} {today_label}")
+    print(f"   This week:  {week} {week_label}")
+    print(f"   This month: {month} {month_label}")
+    print()
+
+
 def format_commit_event(commit_event: dict) -> str:
     """
     Format a parsed commit event for display.
