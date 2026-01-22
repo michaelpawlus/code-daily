@@ -34,7 +34,14 @@ def parse_commit_events(events: list[dict]) -> list[dict]:
         # Extract commit information from payload
         payload = event.get("payload", {})
         commits = payload.get("commits", [])
-        commit_count = payload.get("size", len(commits))
+        # Use size if explicitly provided, otherwise count commits
+        # Default to 1 if no commit info available (API sometimes omits details)
+        if "size" in payload:
+            commit_count = payload["size"]
+        elif commits:
+            commit_count = len(commits)
+        else:
+            commit_count = 1  # At least 1 commit for any push event
 
         # Parse commit details
         parsed_commits = []

@@ -8,7 +8,8 @@ from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
 from src.commit_parser import parse_commit_events
 from src.streak_calculator import calculate_streak
-from src.cli import display_streak, display_calendar, format_commit_event
+from src.stats_calculator import calculate_stats
+from src.cli import display_streak, display_calendar, display_stats, format_commit_event
 
 
 def main():
@@ -43,6 +44,10 @@ def main():
         # Calculate and display streak
         streak_info = calculate_streak(commit_events)
         display_streak(streak_info)
+
+        # Calculate and display stats
+        stats = calculate_stats(commit_events)
+        display_stats(stats)
 
         # Display activity calendar
         display_calendar(streak_info["commit_dates"])
