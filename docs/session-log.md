@@ -50,3 +50,41 @@
 ### Next Up (Day 8)
 - Consider adding daily averages or goals
 - Could add comparison to previous week/month
+
+## Day 8 - 2026-01-22
+
+### Accomplished
+- [x] Created `src/app.py` with FastAPI web application
+- [x] Added `/health` endpoint for health checks
+- [x] Added `/api/stats` endpoint returning streak and stats as JSON
+- [x] Added comprehensive tests (6 test cases) in `tests/test_app.py`
+- [x] Added `httpx` to requirements.txt for TestClient support
+
+### API Endpoints
+
+**GET /health**
+- Returns: `{"status": "ok"}`
+
+**GET /api/stats**
+- Returns JSON with:
+  - `username`: GitHub username
+  - `streak`: current, longest, active status, last commit date
+  - `stats`: today, this_week, this_month, last_7_days, last_30_days, total
+  - `commit_dates`: list of dates with commits
+
+### Decisions Made
+- **Error handling**: Configuration errors return 500, GitHub API errors return 502
+- **Data structure**: Nested JSON with `streak` and `stats` objects for clarity
+- **Fetching more data**: API endpoint fetches 100 events (vs CLI's 30) for better stats
+
+### Running the Server
+```bash
+uvicorn src.app:app --reload
+```
+
+### Challenges/Notes
+- Added `httpx` dependency required by FastAPI's TestClient
+
+### Next Up (Day 9)
+- Simple HTML page to display streak
+- Consider using HTMX for dynamic updates
