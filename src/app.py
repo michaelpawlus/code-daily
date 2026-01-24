@@ -4,7 +4,11 @@ FastAPI web application for code-daily.
 Provides REST API endpoints for streak and stats data.
 """
 
-from fastapi import FastAPI, HTTPException
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
@@ -18,6 +22,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
 
 @app.get("/health")
 def health_check():
@@ -25,13 +31,15 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/api/stats")
-def get_stats():
+def _fetch_stats_data():
     """
-    Get current streak and commit statistics.
+    Fetch and calculate stats data.
 
     Returns:
-        JSON with streak info and commit stats
+        dict with username, streak, stats, and commit_dates
+
+    Raises:
+        HTTPException: on configuration or GitHub API errors
     """
     # Validate configuration
     try:
@@ -72,3 +80,21 @@ def get_stats():
         },
         "commit_dates": streak_info["commit_dates"],
     }
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    """Render the dashboard page."""
+    data = _fetch_stats_data()
+    return templates.TemplateResponse(request, "index.html", data)
+
+
+@app.get("/api/stats")
+def get_stats():
+    """
+    Get current streak and commit statistics.
+
+    Returns:
+        JSON with streak info and commit stats
+    """
+    return _fetch_stats_data()

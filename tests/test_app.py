@@ -7,12 +7,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.app import app
+from src.github_client import GitHubClientError
 
 
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app."""
     return TestClient(app)
+
+
+@pytest.fixture
+def mock_events():
+    """Sample GitHub events for testing."""
+    return [
+        {
+            "type": "PushEvent",
+            "created_at": "2026-01-22T10:00:00Z",
+            "repo": {"name": "user/test-repo"},
+            "payload": {
+                "commits": [{"sha": "abc123", "message": "test commit"}]
+            },
+        }
+    ]
 
 
 class TestHealthEndpoint:
@@ -109,8 +125,6 @@ class TestStatsEndpoint:
     @patch("src.app.GitHubClient")
     def test_stats_github_error(self, mock_github_client, mock_validate, client):
         """Stats endpoint should return 502 on GitHub API error."""
-        from src.github_client import GitHubClientError
-
         mock_client_instance = MagicMock()
         mock_github_client.return_value = mock_client_instance
         mock_client_instance.get_user_events.side_effect = GitHubClientError(
@@ -160,3 +174,72 @@ class TestStatsEndpoint:
         assert data["streak"]["current"] == 3
         assert data["stats"]["total"] == 3
         assert len(data["commit_dates"]) == 3
+
+
+class TestIndexEndpoint:
+    """Tests for the / (index) HTML endpoint."""
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_index_returns_html(self, mock_github_client, mock_validate, client, mock_events):
+        """Index endpoint should return HTML content."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = mock_events
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_index_displays_streak(self, mock_github_client, mock_validate, client, mock_events):
+        """Index page should display Current Streak text."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = mock_events
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "Current Streak" in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_index_displays_username(self, mock_github_client, mock_validate, client, mock_events):
+        """Index page should display the username."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = mock_events
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "@testuser" in response.text
+
+    @patch("src.app.validate_config")
+    def test_index_handles_config_error(self, mock_validate, client):
+        """Index endpoint should return 500 on configuration error."""
+        mock_validate.side_effect = ValueError("Missing GITHUB_TOKEN")
+
+        response = client.get("/")
+
+        assert response.status_code == 500
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    def test_index_handles_github_error(self, mock_github_client, mock_validate, client):
+        """Index endpoint should return 502 on GitHub API error."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.side_effect = GitHubClientError(
+            "API rate limit exceeded"
+        )
+
+        response = client.get("/")
+
+        assert response.status_code == 502
