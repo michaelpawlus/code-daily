@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}code-daily - @{{ username }}{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-2xl">
+    <!-- Header -->
+    <header class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-white">code-daily</h1>
+        <p class="text-gray-400 mt-2">@{{ username }}</p>
+    </header>
+
+    <!-- Streak Section -->
+    <section class="bg-gray-800 rounded-lg p-8 mb-8 text-center">
+        <div class="text-7xl font-bold {% if streak.active %}text-orange-500{% else %}text-gray-500{% endif %}">
+            {{ streak.current }}
+        </div>
+        <div class="text-xl text-gray-400 mt-2">Current Streak</div>
+        {% if not streak.active and streak.current > 0 %}
+        <div class="text-sm text-yellow-500 mt-2">Commit today to keep your streak!</div>
+        {% endif %}
+    </section>
+
+    <!-- Stats Grid -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-white">{{ stats.today }}</div>
+            <div class="text-sm text-gray-400">Today</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-white">{{ stats.this_week }}</div>
+            <div class="text-sm text-gray-400">This Week</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-white">{{ stats.this_month }}</div>
+            <div class="text-sm text-gray-400">This Month</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-white">{{ stats.total }}</div>
+            <div class="text-sm text-gray-400">Total</div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="text-center text-gray-500 text-sm">
+        {% if streak.last_commit_date %}
+        <p>Last commit: {{ streak.last_commit_date }}</p>
+        {% else %}
+        <p>No commits yet</p>
+        {% endif %}
+    </footer>
+</div>
+{% endblock %}
