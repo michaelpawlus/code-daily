@@ -6,9 +6,9 @@ Entry point for the application.
 
 from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
-from src.commit_parser import parse_commit_events
 from src.streak_calculator import calculate_streak
 from src.stats_calculator import calculate_stats
+from src.storage import CommitStorage, get_commit_events_with_history
 from src.cli import display_streak, display_calendar, display_stats, format_commit_event
 
 
@@ -23,19 +23,15 @@ def main():
         print(f"\nConfiguration Error:\n{e}")
         return 1
 
-    # Create client and fetch events
+    # Create client and storage
     client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
 
     try:
         print(f"\nFetching recent activity for {GITHUB_USERNAME}...\n")
-        events = client.get_user_events(per_page=30)
 
-        if not events:
-            print("No recent events found.")
-            return 0
-
-        # Parse commit events
-        commit_events = parse_commit_events(events)
+        # Fetch from API, save to storage, and get all commits
+        commit_events = get_commit_events_with_history(client, storage)
 
         if not commit_events:
             print("No commit events found in recent activity.")

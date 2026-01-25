@@ -94,12 +94,14 @@ class TestStatsEndpoint:
         assert "total" in stats
 
     @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
     @patch("src.app.GitHubClient")
-    def test_stats_with_no_events(self, mock_github_client, mock_validate, client):
+    def test_stats_with_no_events(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
         """Stats endpoint should handle empty events gracefully."""
-        mock_client_instance = MagicMock()
-        mock_github_client.return_value = mock_client_instance
-        mock_client_instance.get_user_events.return_value = []
+        mock_get_commits.return_value = []
 
         response = client.get("/api/stats")
 
@@ -137,34 +139,33 @@ class TestStatsEndpoint:
         assert "rate limit" in response.json()["detail"]
 
     @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
     @patch("src.app.GitHubClient")
     @patch("src.app.calculate_streak")
     def test_stats_calculates_streak_correctly(
-        self, mock_streak, mock_github_client, mock_validate, client
+        self, mock_streak, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
     ):
         """Stats endpoint should correctly calculate streak from events."""
-        mock_client_instance = MagicMock()
-        mock_github_client.return_value = mock_client_instance
-
-        # Create events for 3 consecutive days
-        mock_client_instance.get_user_events.return_value = [
+        # Return 3 commit events from storage
+        mock_get_commits.return_value = [
             {
-                "type": "PushEvent",
-                "created_at": "2026-01-24T10:00:00Z",
-                "repo": {"name": "user/repo"},
-                "payload": {"commits": [{"sha": "a", "message": "m"}]},
+                "date": "2026-01-24",
+                "repo": "user/repo",
+                "commits": [{"sha": "a", "message": "m"}],
+                "commit_count": 1,
             },
             {
-                "type": "PushEvent",
-                "created_at": "2026-01-23T10:00:00Z",
-                "repo": {"name": "user/repo"},
-                "payload": {"commits": [{"sha": "b", "message": "m"}]},
+                "date": "2026-01-23",
+                "repo": "user/repo",
+                "commits": [{"sha": "b", "message": "m"}],
+                "commit_count": 1,
             },
             {
-                "type": "PushEvent",
-                "created_at": "2026-01-22T10:00:00Z",
-                "repo": {"name": "user/repo"},
-                "payload": {"commits": [{"sha": "c", "message": "m"}]},
+                "date": "2026-01-22",
+                "repo": "user/repo",
+                "commits": [{"sha": "c", "message": "m"}],
+                "commit_count": 1,
             },
         ]
 
@@ -259,13 +260,15 @@ class TestFireVisualization:
     """Tests for the streak fire visualization."""
 
     @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
-    def test_no_fire_for_zero_streak(self, mock_github_client, mock_validate, client):
+    def test_no_fire_for_zero_streak(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
         """Zero streak should show no fire icon (dormant smoke)."""
-        mock_client_instance = MagicMock()
-        mock_github_client.return_value = mock_client_instance
-        mock_client_instance.get_user_events.return_value = []
+        mock_get_commits.return_value = []
 
         response = client.get("/")
 
