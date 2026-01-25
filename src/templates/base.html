@@ -6,6 +6,28 @@
     <title>{% block title %}code-daily{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        @keyframes flicker {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            25% { opacity: 0.9; transform: scale(1.02); }
+            50% { opacity: 0.85; transform: scale(1.05); }
+            75% { opacity: 0.9; transform: scale(1.02); }
+        }
+        .fire-animate {
+            animation: flicker 1.5s ease-in-out infinite;
+            display: inline-block;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.6)); }
+            50% { filter: drop-shadow(0 0 16px rgba(249, 115, 22, 0.9)); }
+        }
+        .fire-glow {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+        .badge-on-fire {
+            background: linear-gradient(135deg, #f97316 0%, #dc2626 100%);
+        }
+    </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
     {% block content %}{% endblock %}

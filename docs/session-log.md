@@ -129,3 +129,45 @@ uvicorn src.app:app --reload
 ### Next Up (Day 10)
 - Add fire/flame visualization to streak display
 - Consider animated streak flames using CSS/HTMX
+
+## Day 10 - 2026-01-24
+
+### Accomplished
+- [x] Added fire emoji visualization to streak display with tiered system
+- [x] Created CSS animations for fire flickering and glow effects
+- [x] Implemented milestone badges for 7-day and 30-day streaks
+- [x] Added 5 new tests for fire visualization in `tests/test_app.py`
+
+### Fire Visualization Tiers
+| Streak | Display |
+|--------|---------|
+| 0 | Smoke emoji (💨) - dormant |
+| 1-6 | Single flame (🔥) |
+| 7-13 | Double flame (🔥🔥) + "Week Streak!" badge |
+| 14-29 | Triple flame (🔥🔥🔥) with glow |
+| 30+ | Four flames (🔥🔥🔥🔥) + "ON FIRE! 30+ days" badge with gradient |
+
+### CSS Animations Added
+- **flicker**: Subtle scale and opacity changes (1.5s cycle) for fire animation
+- **pulse-glow**: Orange drop-shadow that pulses (2s cycle) for longer streaks
+- **badge-on-fire**: Linear gradient from orange to red for 30+ day badge
+
+### Files Modified
+- `src/templates/base.html`: Added CSS keyframes and animation classes
+- `src/templates/index.html`: Added fire icons with Jinja2 tier logic and milestone badges
+- `tests/test_app.py`: Added 5 tests for fire visualization + fixed date-sensitive test
+
+### Decisions Made
+- **Unicode emojis**: Used fire (🔥) and smoke (💨) emojis for simplicity and cross-browser support
+- **Data attributes**: Added `data-fire` and `data-badge` attributes for testability
+- **Progressive enhancement**: More flames + glow effect for longer streaks to reward consistency
+- **Glow for 14+ days**: Added `fire-glow` class only for triple/multi flames to make longer streaks feel more special
+
+### Challenges/Notes
+- Fixed existing date-sensitive test that used hardcoded dates from the past
+- Tests mock `calculate_streak` directly to avoid date dependency issues
+
+### Next Up (Day 11)
+- Consider adding streak history visualization
+- Could add sound effects or haptic feedback for milestones
+- Consider persistence layer for historical data
