@@ -12,9 +12,9 @@ from fastapi.templating import Jinja2Templates
 
 from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
-from src.commit_parser import parse_commit_events
 from src.streak_calculator import calculate_streak
 from src.stats_calculator import calculate_stats
+from src.storage import CommitStorage, get_commit_events_with_history
 
 app = FastAPI(
     title="code-daily",
@@ -47,16 +47,15 @@ def _fetch_stats_data():
     except ValueError as e:
         raise HTTPException(status_code=500, detail=f"Configuration error: {e}")
 
-    # Create client and fetch events
+    # Create client and storage
     client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
 
     try:
-        events = client.get_user_events(per_page=100)
+        # Fetch from API, save to storage, and get all commits
+        commit_events = get_commit_events_with_history(client, storage)
     except GitHubClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
-
-    # Parse commit events
-    commit_events = parse_commit_events(events)
 
     # Calculate streak and stats
     streak_info = calculate_streak(commit_events)
