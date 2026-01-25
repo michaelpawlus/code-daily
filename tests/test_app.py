@@ -138,8 +138,9 @@ class TestStatsEndpoint:
 
     @patch("src.app.validate_config")
     @patch("src.app.GitHubClient")
+    @patch("src.app.calculate_streak")
     def test_stats_calculates_streak_correctly(
-        self, mock_github_client, mock_validate, client
+        self, mock_streak, mock_github_client, mock_validate, client
     ):
         """Stats endpoint should correctly calculate streak from events."""
         mock_client_instance = MagicMock()
@@ -149,23 +150,32 @@ class TestStatsEndpoint:
         mock_client_instance.get_user_events.return_value = [
             {
                 "type": "PushEvent",
-                "created_at": "2026-01-22T10:00:00Z",
+                "created_at": "2026-01-24T10:00:00Z",
                 "repo": {"name": "user/repo"},
                 "payload": {"commits": [{"sha": "a", "message": "m"}]},
             },
             {
                 "type": "PushEvent",
-                "created_at": "2026-01-21T10:00:00Z",
+                "created_at": "2026-01-23T10:00:00Z",
                 "repo": {"name": "user/repo"},
                 "payload": {"commits": [{"sha": "b", "message": "m"}]},
             },
             {
                 "type": "PushEvent",
-                "created_at": "2026-01-20T10:00:00Z",
+                "created_at": "2026-01-22T10:00:00Z",
                 "repo": {"name": "user/repo"},
                 "payload": {"commits": [{"sha": "c", "message": "m"}]},
             },
         ]
+
+        # Mock streak calculation for consistent test results
+        mock_streak.return_value = {
+            "current_streak": 3,
+            "longest_streak": 3,
+            "streak_active": True,
+            "last_commit_date": "2026-01-24",
+            "commit_dates": ["2026-01-24", "2026-01-23", "2026-01-22"],
+        }
 
         response = client.get("/api/stats")
         data = response.json()
@@ -243,3 +253,129 @@ class TestIndexEndpoint:
         response = client.get("/")
 
         assert response.status_code == 502
+
+
+class TestFireVisualization:
+    """Tests for the streak fire visualization."""
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_no_fire_for_zero_streak(self, mock_github_client, mock_validate, client):
+        """Zero streak should show no fire icon (dormant smoke)."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = []
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-fire="none"' in response.text
+        assert 'data-fire="single"' not in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    @patch("src.app.calculate_streak")
+    def test_single_fire_for_streak_1_to_6(
+        self, mock_streak, mock_github_client, mock_validate, client
+    ):
+        """Streak of 1-6 days should show single fire icon."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = []
+
+        # Mock streak calculation to return streak of 3
+        mock_streak.return_value = {
+            "current_streak": 3,
+            "longest_streak": 3,
+            "streak_active": True,
+            "last_commit_date": "2026-01-24",
+            "commit_dates": ["2026-01-24", "2026-01-23", "2026-01-22"],
+        }
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-fire="single"' in response.text
+        assert 'data-fire="double"' not in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    @patch("src.app.calculate_streak")
+    def test_double_fire_for_streak_7_to_13(
+        self, mock_streak, mock_github_client, mock_validate, client
+    ):
+        """Streak of 7-13 days should show double fire icon."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = []
+
+        # Mock streak calculation to return streak of 10
+        mock_streak.return_value = {
+            "current_streak": 10,
+            "longest_streak": 10,
+            "streak_active": True,
+            "last_commit_date": "2026-01-24",
+            "commit_dates": [f"2026-01-{24-i:02d}" for i in range(10)],
+        }
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-fire="double"' in response.text
+        assert 'data-badge="week"' in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    @patch("src.app.calculate_streak")
+    def test_triple_fire_for_streak_14_to_29(
+        self, mock_streak, mock_github_client, mock_validate, client
+    ):
+        """Streak of 14-29 days should show triple fire icon."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = []
+
+        # Mock streak calculation to return streak of 20
+        mock_streak.return_value = {
+            "current_streak": 20,
+            "longest_streak": 20,
+            "streak_active": True,
+            "last_commit_date": "2026-01-24",
+            "commit_dates": ["2026-01-24"],  # Simplified
+        }
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-fire="triple"' in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    @patch("src.app.calculate_streak")
+    def test_multi_fire_for_streak_30_plus(
+        self, mock_streak, mock_github_client, mock_validate, client
+    ):
+        """Streak of 30+ days should show multiple fire icons and on-fire badge."""
+        mock_client_instance = MagicMock()
+        mock_github_client.return_value = mock_client_instance
+        mock_client_instance.get_user_events.return_value = []
+
+        # Mock streak calculation to return streak of 35
+        mock_streak.return_value = {
+            "current_streak": 35,
+            "longest_streak": 35,
+            "streak_active": True,
+            "last_commit_date": "2026-01-24",
+            "commit_dates": ["2026-01-24"],  # Simplified
+        }
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-fire="multi"' in response.text
+        assert 'data-badge="on-fire"' in response.text

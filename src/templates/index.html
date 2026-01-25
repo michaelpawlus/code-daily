@@ -12,10 +12,56 @@
 
     <!-- Streak Section -->
     <section class="bg-gray-800 rounded-lg p-8 mb-8 text-center">
+        <!-- Fire Visualization -->
+        <div class="mb-4 h-16 flex items-center justify-center">
+            {% if streak.current >= 30 %}
+            <!-- Multiple flames with on-fire badge -->
+            <div class="fire-animate fire-glow">
+                <span class="text-5xl" data-fire="multi">🔥🔥🔥🔥</span>
+            </div>
+            {% elif streak.current >= 14 %}
+            <!-- Triple flame -->
+            <div class="fire-animate fire-glow">
+                <span class="text-5xl" data-fire="triple">🔥🔥🔥</span>
+            </div>
+            {% elif streak.current >= 7 %}
+            <!-- Double flame -->
+            <div class="fire-animate">
+                <span class="text-5xl" data-fire="double">🔥🔥</span>
+            </div>
+            {% elif streak.current >= 1 %}
+            <!-- Single flame -->
+            <div class="fire-animate">
+                <span class="text-5xl" data-fire="single">🔥</span>
+            </div>
+            {% else %}
+            <!-- No flame (dormant) -->
+            <div class="text-gray-600">
+                <span class="text-5xl" data-fire="none">💨</span>
+            </div>
+            {% endif %}
+        </div>
+
         <div class="text-7xl font-bold {% if streak.active %}text-orange-500{% else %}text-gray-500{% endif %}">
             {{ streak.current }}
         </div>
         <div class="text-xl text-gray-400 mt-2">Current Streak</div>
+
+        <!-- Milestone Badges -->
+        {% if streak.current >= 30 %}
+        <div class="mt-4">
+            <span class="badge-on-fire text-white text-sm font-bold px-4 py-1 rounded-full" data-badge="on-fire">
+                🏆 ON FIRE! 30+ days
+            </span>
+        </div>
+        {% elif streak.current >= 7 %}
+        <div class="mt-4">
+            <span class="bg-orange-600 text-white text-sm font-bold px-4 py-1 rounded-full" data-badge="week">
+                🎯 Week Streak!
+            </span>
+        </div>
+        {% endif %}
+
         {% if not streak.active and streak.current > 0 %}
         <div class="text-sm text-yellow-500 mt-2">Commit today to keep your streak!</div>
         {% endif %}
