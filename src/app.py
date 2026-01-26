@@ -14,6 +14,7 @@ from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
 from src.streak_calculator import calculate_streak
 from src.stats_calculator import calculate_stats
+from src.history_calculator import calculate_history
 from src.storage import CommitStorage, get_commit_events_with_history
 
 app = FastAPI(
@@ -78,6 +79,7 @@ def _fetch_stats_data():
             "total": stats["total_commits"],
         },
         "commit_dates": streak_info["commit_dates"],
+        "commit_events": commit_events,
     }
 
 
@@ -85,6 +87,8 @@ def _fetch_stats_data():
 def index(request: Request):
     """Render the dashboard page."""
     data = _fetch_stats_data()
+    # Add history data for heatmap
+    data["history"] = calculate_history(data.get("commit_events", []))
     return templates.TemplateResponse(request, "index.html", data)
 
 
@@ -97,3 +101,29 @@ def get_stats():
         JSON with streak info and commit stats
     """
     return _fetch_stats_data()
+
+
+@app.get("/api/history")
+def get_history():
+    """
+    Get commit history for heatmap display.
+
+    Returns:
+        JSON with daily commit counts and intensity levels for 84 days
+    """
+    # Validate configuration
+    try:
+        validate_config()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {e}")
+
+    # Create client and storage
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
+
+    try:
+        commit_events = get_commit_events_with_history(client, storage)
+    except GitHubClientError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return calculate_history(commit_events)
