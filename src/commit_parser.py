@@ -2,6 +2,8 @@
 Parse commit events from GitHub API responses.
 """
 
+from datetime import datetime
+
 
 def parse_commit_events(events: list[dict]) -> list[dict]:
     """
@@ -28,7 +30,13 @@ def parse_commit_events(events: list[dict]) -> list[dict]:
 
         # Extract event details
         created_at = event.get("created_at", "")
-        date = created_at[:10] if created_at else "unknown"
+        if created_at:
+            # Parse UTC timestamp and convert to local timezone
+            utc_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            local_dt = utc_dt.astimezone()  # Converts to system local timezone
+            date = local_dt.strftime("%Y-%m-%d")
+        else:
+            date = "unknown"
         repo = event.get("repo", {}).get("name", "unknown")
 
         # Extract commit information from payload
@@ -45,10 +53,18 @@ def parse_commit_events(events: list[dict]) -> list[dict]:
 
         # Parse commit details
         parsed_commits = []
-        for commit in commits:
+        if commits:
+            for commit in commits:
+                parsed_commits.append({
+                    "sha": commit.get("sha", "")[:7],  # Short SHA
+                    "message": commit.get("message", "").split("\n")[0],  # First line only
+                })
+        elif payload.get("head"):
+            # GitHub API sometimes omits commits array but includes head SHA
+            # Create a synthetic commit entry to ensure storage works
             parsed_commits.append({
-                "sha": commit.get("sha", "")[:7],  # Short SHA
-                "message": commit.get("message", "").split("\n")[0],  # First line only
+                "sha": payload["head"][:7],
+                "message": "",  # No message available
             })
 
         commit_events.append({

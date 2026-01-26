@@ -2,6 +2,9 @@
 Tests for commit event parsing.
 """
 
+import os
+import time
+
 import pytest
 from src.commit_parser import parse_commit_events
 
@@ -198,3 +201,125 @@ def test_parse_event_sha_shortened():
     result = parse_commit_events(events)
 
     assert result[0]["commits"][0]["sha"] == "abcdefg"
+
+
+@pytest.fixture
+def set_timezone():
+    """Fixture to temporarily set timezone for tests."""
+    original_tz = os.environ.get("TZ")
+
+    def _set_tz(tz_name):
+        os.environ["TZ"] = tz_name
+        time.tzset()
+
+    yield _set_tz
+
+    # Restore original timezone
+    if original_tz is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = original_tz
+    time.tzset()
+
+
+class TestTimezoneConversion:
+    """Tests for UTC to local timezone conversion."""
+
+    def test_utc_timestamp_converted_to_local_date_est(self, set_timezone):
+        """Test that UTC timestamps are converted to EST timezone before extracting date."""
+        set_timezone("America/New_York")
+
+        # A commit at 3 AM UTC on Jan 25 is actually late evening on Jan 24 in EST (UTC-5)
+        events = [
+            {
+                "type": "PushEvent",
+                "created_at": "2026-01-25T03:00:00Z",
+                "repo": {"name": "user/test-repo"},
+                "payload": {
+                    "size": 1,
+                    "commits": [{"sha": "abc1234567890", "message": "late commit"}],
+                },
+            }
+        ]
+
+        result = parse_commit_events(events)
+
+        # 3 AM UTC = 10 PM EST previous day (Jan 24)
+        assert result[0]["date"] == "2026-01-24"
+
+    def test_utc_midday_same_date_in_est(self, set_timezone):
+        """Test that midday UTC remains same date in EST."""
+        set_timezone("America/New_York")
+
+        events = [
+            {
+                "type": "PushEvent",
+                "created_at": "2026-01-25T12:00:00Z",
+                "repo": {"name": "user/test-repo"},
+                "payload": {
+                    "size": 1,
+                    "commits": [{"sha": "abc1234567890", "message": "midday commit"}],
+                },
+            }
+        ]
+
+        result = parse_commit_events(events)
+
+        # 12 PM UTC = 7 AM EST same day
+        assert result[0]["date"] == "2026-01-25"
+
+    def test_utc_late_night_next_day_in_positive_offset(self, set_timezone):
+        """Test that late night UTC becomes next day in JST (UTC+9)."""
+        set_timezone("Asia/Tokyo")
+
+        events = [
+            {
+                "type": "PushEvent",
+                "created_at": "2026-01-25T23:00:00Z",
+                "repo": {"name": "user/test-repo"},
+                "payload": {
+                    "size": 1,
+                    "commits": [{"sha": "abc1234567890", "message": "late commit"}],
+                },
+            }
+        ]
+
+        result = parse_commit_events(events)
+
+        # 11 PM UTC = 8 AM JST next day (Jan 26)
+        assert result[0]["date"] == "2026-01-26"
+
+    def test_empty_created_at_returns_unknown(self):
+        """Test that empty created_at still returns 'unknown'."""
+        events = [
+            {
+                "type": "PushEvent",
+                "created_at": "",
+                "repo": {"name": "user/test-repo"},
+                "payload": {"size": 1, "commits": []},
+            }
+        ]
+
+        result = parse_commit_events(events)
+        assert result[0]["date"] == "unknown"
+
+    def test_utc_midnight_boundary(self, set_timezone):
+        """Test commits right at UTC midnight are handled correctly."""
+        set_timezone("America/New_York")
+
+        events = [
+            {
+                "type": "PushEvent",
+                "created_at": "2026-01-26T00:00:00Z",
+                "repo": {"name": "user/test-repo"},
+                "payload": {
+                    "size": 1,
+                    "commits": [{"sha": "abc1234567890", "message": "midnight commit"}],
+                },
+            }
+        ]
+
+        result = parse_commit_events(events)
+
+        # Midnight UTC = 7 PM EST previous day (Jan 25)
+        assert result[0]["date"] == "2026-01-25"
