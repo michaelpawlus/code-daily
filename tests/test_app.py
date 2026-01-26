@@ -382,3 +382,149 @@ class TestFireVisualization:
         assert response.status_code == 200
         assert 'data-fire="multi"' in response.text
         assert 'data-badge="on-fire"' in response.text
+
+
+class TestHistoryEndpoint:
+    """Tests for the /api/history endpoint."""
+
+    @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
+    @patch("src.app.GitHubClient")
+    def test_history_returns_expected_structure(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
+        """History endpoint should return JSON with expected structure."""
+        mock_get_commits.return_value = [
+            {
+                "date": "2026-01-26",
+                "repo": "user/repo",
+                "commits": [{"sha": "abc", "message": "test"}],
+                "commit_count": 2,
+            }
+        ]
+
+        response = client.get("/api/history")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check top-level keys
+        assert "days" in data
+        assert "period" in data
+        assert "max_count" in data
+
+        # Check days structure
+        assert len(data["days"]) == 84  # Default 12 weeks
+        day = data["days"][0]
+        assert "date" in day
+        assert "count" in day
+        assert "level" in day
+
+        # Check period structure
+        assert "start" in data["period"]
+        assert "end" in data["period"]
+        assert "total_days" in data["period"]
+
+    @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
+    @patch("src.app.GitHubClient")
+    def test_history_with_no_events(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
+        """History endpoint should handle empty events gracefully."""
+        mock_get_commits.return_value = []
+
+        response = client.get("/api/history")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["max_count"] == 0
+        # All days should have level 0
+        for day in data["days"]:
+            assert day["count"] == 0
+            assert day["level"] == 0
+
+
+class TestHeatmapVisualization:
+    """Tests for the heatmap visualization on the index page."""
+
+    @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_index_contains_heatmap_container(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
+        """Index page should contain the heatmap section."""
+        mock_get_commits.return_value = []
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "data-heatmap" in response.text
+        assert "Activity History" in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_heatmap_cells_have_level_classes(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
+        """Heatmap cells should have level-N classes based on commit counts."""
+        mock_get_commits.return_value = []
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        # With no commits, all cells should have level-0
+        assert "level-0" in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    @patch("src.app.calculate_history")
+    def test_heatmap_cells_have_data_attributes(
+        self, mock_history, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
+        """Heatmap cells should have data-date and data-count attributes."""
+        mock_get_commits.return_value = []
+        mock_history.return_value = {
+            "days": [
+                {"date": "2026-01-26", "count": 3, "level": 2},
+                {"date": "2026-01-25", "count": 0, "level": 0},
+            ],
+            "period": {"start": "2025-11-04", "end": "2026-01-26", "total_days": 84},
+            "max_count": 3,
+        }
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-date="2026-01-26"' in response.text
+        assert 'data-count="3"' in response.text
+        assert "level-2" in response.text
+
+    @patch("src.app.validate_config")
+    @patch("src.app.get_commit_events_with_history")
+    @patch("src.app.CommitStorage")
+    @patch("src.app.GitHubClient")
+    @patch("src.app.GITHUB_USERNAME", "testuser")
+    def test_heatmap_legend_displayed(
+        self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
+    ):
+        """Heatmap should display the legend with Less/More labels."""
+        mock_get_commits.return_value = []
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "Less" in response.text
+        assert "More" in response.text
