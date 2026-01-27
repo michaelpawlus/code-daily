@@ -56,6 +56,13 @@ class CommitStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(date)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             conn.commit()
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -191,6 +198,45 @@ class CommitStorage:
         """Delete all commits from the database. Primarily for testing."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM commits")
+            conn.commit()
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        """
+        Get a setting value by key.
+
+        Args:
+            key: The setting key
+            default: Default value if key doesn't exist
+
+        Returns:
+            The setting value or default
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?",
+                (key,),
+            ).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        """
+        Set a setting value (upserts).
+
+        Args:
+            key: The setting key
+            value: The value to store
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO settings (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, value),
+            )
             conn.commit()
 
 

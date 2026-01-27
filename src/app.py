@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
 from src.github_client import GitHubClient, GitHubClientError
@@ -24,6 +25,15 @@ app = FastAPI(
 )
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+DEFAULT_DAILY_GOAL = 1
+DAILY_GOAL_KEY = "daily_commit_goal"
+
+
+class GoalUpdate(BaseModel):
+    """Request model for updating the daily goal."""
+
+    goal: int = Field(..., ge=1, le=100, description="Daily commit goal (1-100)")
 
 
 @app.get("/health")
@@ -62,6 +72,10 @@ def _fetch_stats_data():
     streak_info = calculate_streak(commit_events)
     stats = calculate_stats(commit_events)
 
+    # Get daily goal
+    goal_str = storage.get_setting(DAILY_GOAL_KEY, str(DEFAULT_DAILY_GOAL))
+    daily_goal = int(goal_str) if goal_str else DEFAULT_DAILY_GOAL
+
     return {
         "username": GITHUB_USERNAME,
         "streak": {
@@ -77,6 +91,11 @@ def _fetch_stats_data():
             "last_7_days": stats["commits_last_7_days"],
             "last_30_days": stats["commits_last_30_days"],
             "total": stats["total_commits"],
+        },
+        "goal": {
+            "daily": daily_goal,
+            "today_progress": stats["commits_today"],
+            "met": stats["commits_today"] >= daily_goal,
         },
         "commit_dates": streak_info["commit_dates"],
         "commit_events": commit_events,
@@ -127,3 +146,33 @@ def get_history():
         raise HTTPException(status_code=502, detail=str(e))
 
     return calculate_history(commit_events)
+
+
+@app.get("/api/goal")
+def get_goal():
+    """
+    Get current daily commit goal.
+
+    Returns:
+        JSON with the current daily goal
+    """
+    storage = CommitStorage()
+    goal_str = storage.get_setting(DAILY_GOAL_KEY, str(DEFAULT_DAILY_GOAL))
+    daily_goal = int(goal_str) if goal_str else DEFAULT_DAILY_GOAL
+    return {"goal": daily_goal}
+
+
+@app.post("/api/goal")
+def set_goal(update: GoalUpdate):
+    """
+    Set daily commit goal.
+
+    Args:
+        update: GoalUpdate with goal value (1-100)
+
+    Returns:
+        JSON with the updated goal
+    """
+    storage = CommitStorage()
+    storage.set_setting(DAILY_GOAL_KEY, str(update.goal))
+    return {"goal": update.goal}

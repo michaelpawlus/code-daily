@@ -60,5 +60,51 @@
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
     {% block content %}{% endblock %}
+
+    <script>
+        function toggleGoalForm() {
+            const display = document.querySelector('[data-goal-display]');
+            const form = document.querySelector('[data-goal-form]');
+            const editBtn = document.querySelector('[data-goal-edit-btn]');
+
+            if (form.classList.contains('hidden')) {
+                display.classList.add('hidden');
+                form.classList.remove('hidden');
+                editBtn.classList.add('hidden');
+            } else {
+                display.classList.remove('hidden');
+                form.classList.add('hidden');
+                editBtn.classList.remove('hidden');
+            }
+        }
+
+        async function saveGoal(event) {
+            event.preventDefault();
+            const input = document.getElementById('goal-input');
+            const goal = parseInt(input.value, 10);
+
+            if (goal < 1 || goal > 100) {
+                alert('Goal must be between 1 and 100');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/goal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ goal: goal })
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert('Error: ' + (data.detail || 'Failed to save goal'));
+                }
+            } catch (error) {
+                alert('Error saving goal: ' + error.message);
+            }
+        }
+    </script>
 </body>
 </html>

@@ -87,6 +87,57 @@
         </div>
     </section>
 
+    <!-- Daily Goal Progress -->
+    <section class="bg-gray-800 rounded-lg p-6 mb-8" data-goal>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-white">Daily Goal</h2>
+            <button onclick="toggleGoalForm()" class="text-sm text-gray-400 hover:text-white" data-goal-edit-btn>
+                Edit
+            </button>
+        </div>
+
+        <!-- Goal Display -->
+        <div data-goal-display>
+            <!-- Progress Bar -->
+            <div class="w-full bg-gray-700 rounded-full h-4 mb-3">
+                {% set progress_pct = (goal.today_progress / goal.daily * 100) | int %}
+                {% set capped_pct = [progress_pct, 100] | min %}
+                <div class="h-4 rounded-full transition-all duration-300 {% if goal.met %}bg-green-500{% else %}bg-orange-500{% endif %}"
+                     style="width: {{ capped_pct }}%"
+                     data-goal-bar></div>
+            </div>
+
+            <!-- Progress Text -->
+            <div class="flex items-center justify-between text-sm">
+                <span class="text-gray-300" data-goal-count>
+                    {{ goal.today_progress }} / {{ goal.daily }} commit{% if goal.daily != 1 %}s{% endif %}
+                </span>
+                <span class="{% if goal.met %}text-green-400{% else %}text-orange-400{% endif %}" data-goal-status>
+                    {% if goal.met %}
+                    Goal met!
+                    {% else %}
+                    {{ goal.daily - goal.today_progress }} more to reach your goal
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <!-- Goal Edit Form (hidden by default) -->
+        <form onsubmit="saveGoal(event)" class="hidden" data-goal-form>
+            <div class="flex items-center gap-3">
+                <label for="goal-input" class="text-sm text-gray-400">Commits per day:</label>
+                <input type="number" id="goal-input" name="goal" min="1" max="100" value="{{ goal.daily }}"
+                       class="w-20 px-3 py-1 bg-gray-700 border border-gray-600 rounded text-white text-center focus:outline-none focus:border-orange-500">
+                <button type="submit" class="px-4 py-1 bg-orange-500 hover:bg-orange-600 text-white text-sm rounded">
+                    Save
+                </button>
+                <button type="button" onclick="toggleGoalForm()" class="px-4 py-1 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </section>
+
     <!-- Activity History Heatmap -->
     <section class="bg-gray-800 rounded-lg p-6 mb-8" data-heatmap>
         <h2 class="text-lg font-semibold text-white mb-4">Activity History</h2>
