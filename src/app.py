@@ -17,6 +17,7 @@ from src.streak_calculator import calculate_streak
 from src.stats_calculator import calculate_stats
 from src.history_calculator import calculate_history
 from src.storage import CommitStorage, get_commit_events_with_history
+from src.achievements import check_achievements, get_all_achievements_status
 
 app = FastAPI(
     title="code-daily",
@@ -76,6 +77,35 @@ def _fetch_stats_data():
     goal_str = storage.get_setting(DAILY_GOAL_KEY, str(DEFAULT_DAILY_GOAL))
     daily_goal = int(goal_str) if goal_str else DEFAULT_DAILY_GOAL
 
+    # Process achievements
+    unlocked_records = storage.get_unlocked_achievements()
+    unlocked_ids = {r["id"] for r in unlocked_records}
+
+    # Check for newly unlocked achievements
+    newly_unlocked = check_achievements(
+        current_streak=streak_info["current_streak"],
+        longest_streak=streak_info["longest_streak"],
+        total_commits=stats["total_commits"],
+        unlocked_ids=unlocked_ids,
+    )
+
+    # Save newly unlocked achievements
+    for achievement in newly_unlocked:
+        if achievement.category == "streak":
+            value = streak_info["longest_streak"]
+        else:
+            value = stats["total_commits"]
+        # Only save if value actually meets threshold (defensive check)
+        if value >= achievement.threshold:
+            storage.save_achievement(achievement.id, value)
+
+    # Refresh unlocked records if there were new achievements
+    if newly_unlocked:
+        unlocked_records = storage.get_unlocked_achievements()
+
+    # Get all achievements with status
+    achievements = get_all_achievements_status(unlocked_records)
+
     return {
         "username": GITHUB_USERNAME,
         "streak": {
@@ -99,6 +129,7 @@ def _fetch_stats_data():
         },
         "commit_dates": streak_info["commit_dates"],
         "commit_events": commit_events,
+        "achievements": achievements,
     }
 
 
@@ -176,3 +207,24 @@ def set_goal(update: GoalUpdate):
     storage = CommitStorage()
     storage.set_setting(DAILY_GOAL_KEY, str(update.goal))
     return {"goal": update.goal}
+
+
+@app.get("/api/achievements")
+def get_achievements():
+    """
+    Get all achievements with unlock status.
+
+    Returns:
+        JSON with achievements list and summary
+    """
+    data = _fetch_stats_data()
+    achievements = data["achievements"]
+    unlocked_count = sum(1 for a in achievements if a["unlocked"])
+
+    return {
+        "achievements": achievements,
+        "summary": {
+            "total": len(achievements),
+            "unlocked": unlocked_count,
+        },
+    }

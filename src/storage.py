@@ -63,6 +63,13 @@ class CommitStorage:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS achievements (
+                    id TEXT PRIMARY KEY,
+                    unlocked_at TEXT NOT NULL,
+                    unlocked_value INTEGER
+                )
+            """)
             conn.commit()
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -237,6 +244,50 @@ class CommitStorage:
                 """,
                 (key, value),
             )
+            conn.commit()
+
+    def get_unlocked_achievements(self) -> list[dict]:
+        """
+        Get all unlocked achievements.
+
+        Returns:
+            List of achievement records with id, unlocked_at, and unlocked_value
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, unlocked_at, unlocked_value FROM achievements"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_achievement(self, achievement_id: str, unlocked_value: int | None = None) -> bool:
+        """
+        Save a newly unlocked achievement.
+
+        Uses INSERT OR IGNORE for idempotency - won't update if already exists.
+
+        Args:
+            achievement_id: The achievement ID
+            unlocked_value: The value at which the achievement was unlocked
+
+        Returns:
+            True if the achievement was newly saved, False if it already existed
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO achievements (id, unlocked_at, unlocked_value)
+                VALUES (?, datetime('now'), ?)
+                """,
+                (achievement_id, unlocked_value),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def reset_achievements(self) -> None:
+        """Delete all achievements. For debugging/reset purposes."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM achievements")
             conn.commit()
 
 
