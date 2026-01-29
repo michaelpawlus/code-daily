@@ -175,6 +175,53 @@
         </div>
     </section>
 
+    <!-- Achievements Section -->
+    <section class="bg-gray-800 rounded-lg p-6 mb-8" data-achievements>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-white">Achievements</h2>
+            {% set unlocked_count = achievements | selectattr('unlocked') | list | length %}
+            <span class="text-sm text-gray-400" data-achievements-progress>
+                {{ unlocked_count }} / {{ achievements | length }} unlocked
+            </span>
+        </div>
+
+        <!-- Achievements Grid -->
+        <div class="grid grid-cols-5 gap-3" data-achievements-grid>
+            {% for achievement in achievements %}
+            <div class="achievement-card relative group p-3 rounded-lg text-center transition-all duration-200
+                        {% if achievement.unlocked %}bg-gray-700 hover:bg-gray-600{% else %}bg-gray-900 opacity-50{% endif %}"
+                 data-achievement-id="{{ achievement.id }}"
+                 data-unlocked="{{ 'true' if achievement.unlocked else 'false' }}">
+                <!-- Emoji -->
+                <div class="text-2xl mb-1 {% if not achievement.unlocked %}grayscale{% endif %}">
+                    {{ achievement.emoji }}
+                </div>
+                <!-- Name -->
+                <div class="text-xs font-medium {% if achievement.unlocked %}text-white{% else %}text-gray-500{% endif %} truncate">
+                    {{ achievement.name }}
+                </div>
+
+                <!-- Tooltip -->
+                <div class="achievement-tooltip absolute z-10 invisible group-hover:visible opacity-0 group-hover:opacity-100
+                            transition-opacity duration-200 bottom-full left-1/2 transform -translate-x-1/2 mb-2
+                            bg-gray-900 text-white text-xs rounded-lg p-3 w-48 shadow-lg">
+                    <div class="font-semibold mb-1">{{ achievement.name }}</div>
+                    <div class="text-gray-400 mb-1">{{ achievement.description }}</div>
+                    {% if achievement.unlocked %}
+                    <div class="text-green-400 text-xs">
+                        Unlocked: {{ achievement.unlocked_at[:10] if achievement.unlocked_at else 'Unknown' }}
+                    </div>
+                    {% else %}
+                    <div class="text-gray-500 text-xs">Locked</div>
+                    {% endif %}
+                    <!-- Tooltip arrow -->
+                    <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-8 border-transparent border-t-gray-900"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
     <!-- Footer -->
     <footer class="text-center text-gray-500 text-sm">
         {% if streak.last_commit_date %}
