@@ -208,7 +208,7 @@ class TestIndexEndpoint:
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
     def test_index_displays_streak(self, mock_github_client, mock_validate, client, mock_events):
-        """Index page should display Current Streak text."""
+        """Index page should display streak text."""
         mock_client_instance = MagicMock()
         mock_github_client.return_value = mock_client_instance
         mock_client_instance.get_user_events.return_value = mock_events
@@ -216,7 +216,7 @@ class TestIndexEndpoint:
         response = client.get("/")
 
         assert response.status_code == 200
-        assert "Current Streak" in response.text
+        assert "day streak" in response.text
 
     @patch("src.app.validate_config")
     @patch("src.app.GitHubClient")
@@ -256,34 +256,35 @@ class TestIndexEndpoint:
         assert response.status_code == 502
 
 
-class TestFireVisualization:
-    """Tests for the streak fire visualization."""
+class TestStreakRingVisualization:
+    """Tests for the streak progress ring visualization."""
 
     @patch("src.app.validate_config")
     @patch("src.app.get_commit_events_with_history")
     @patch("src.app.CommitStorage")
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
-    def test_no_fire_for_zero_streak(
+    def test_no_progress_for_zero_streak(
         self, mock_github_client, mock_storage, mock_get_commits, mock_validate, client
     ):
-        """Zero streak should show no fire icon (dormant smoke)."""
+        """Zero streak should show only background ring (no progress arc)."""
         mock_get_commits.return_value = []
 
         response = client.get("/")
 
         assert response.status_code == 200
-        assert 'data-fire="none"' in response.text
-        assert 'data-fire="single"' not in response.text
+        # Should have SVG ring but no progress circle (streak.current > 0 check)
+        assert "viewBox" in response.text  # SVG present
+        assert 'gradient-teal' in response.text  # Teal gradient defined
 
     @patch("src.app.validate_config")
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
     @patch("src.app.calculate_streak")
-    def test_single_fire_for_streak_1_to_6(
+    def test_teal_gradient_for_streak_1_to_6(
         self, mock_streak, mock_github_client, mock_validate, client
     ):
-        """Streak of 1-6 days should show single fire icon."""
+        """Streak of 1-6 days should use teal gradient."""
         mock_client_instance = MagicMock()
         mock_github_client.return_value = mock_client_instance
         mock_client_instance.get_user_events.return_value = []
@@ -300,17 +301,17 @@ class TestFireVisualization:
         response = client.get("/")
 
         assert response.status_code == 200
-        assert 'data-fire="single"' in response.text
-        assert 'data-fire="double"' not in response.text
+        # Should use teal gradient (0-6 days)
+        assert 'url(#gradient-teal)' in response.text
 
     @patch("src.app.validate_config")
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
     @patch("src.app.calculate_streak")
-    def test_double_fire_for_streak_7_to_13(
+    def test_green_gradient_for_streak_7_to_13(
         self, mock_streak, mock_github_client, mock_validate, client
     ):
-        """Streak of 7-13 days should show double fire icon."""
+        """Streak of 7-13 days should use green gradient and show week badge."""
         mock_client_instance = MagicMock()
         mock_github_client.return_value = mock_client_instance
         mock_client_instance.get_user_events.return_value = []
@@ -327,17 +328,17 @@ class TestFireVisualization:
         response = client.get("/")
 
         assert response.status_code == 200
-        assert 'data-fire="double"' in response.text
+        assert 'url(#gradient-green)' in response.text
         assert 'data-badge="week"' in response.text
 
     @patch("src.app.validate_config")
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
     @patch("src.app.calculate_streak")
-    def test_triple_fire_for_streak_14_to_29(
+    def test_purple_gradient_for_streak_14_to_29(
         self, mock_streak, mock_github_client, mock_validate, client
     ):
-        """Streak of 14-29 days should show triple fire icon."""
+        """Streak of 14-29 days should use purple gradient and show two-weeks badge."""
         mock_client_instance = MagicMock()
         mock_github_client.return_value = mock_client_instance
         mock_client_instance.get_user_events.return_value = []
@@ -354,16 +355,17 @@ class TestFireVisualization:
         response = client.get("/")
 
         assert response.status_code == 200
-        assert 'data-fire="triple"' in response.text
+        assert 'url(#gradient-purple)' in response.text
+        assert 'data-badge="two-weeks"' in response.text
 
     @patch("src.app.validate_config")
     @patch("src.app.GitHubClient")
     @patch("src.app.GITHUB_USERNAME", "testuser")
     @patch("src.app.calculate_streak")
-    def test_multi_fire_for_streak_30_plus(
+    def test_gold_gradient_for_streak_30_plus(
         self, mock_streak, mock_github_client, mock_validate, client
     ):
-        """Streak of 30+ days should show multiple fire icons and on-fire badge."""
+        """Streak of 30+ days should use gold gradient with animation and on-fire badge."""
         mock_client_instance = MagicMock()
         mock_github_client.return_value = mock_client_instance
         mock_client_instance.get_user_events.return_value = []
@@ -380,7 +382,8 @@ class TestFireVisualization:
         response = client.get("/")
 
         assert response.status_code == 200
-        assert 'data-fire="multi"' in response.text
+        assert 'url(#gradient-gold)' in response.text
+        assert 'ring-animate' in response.text  # Animation class
         assert 'data-badge="on-fire"' in response.text
 
 

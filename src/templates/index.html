@@ -3,95 +3,171 @@
 {% block title %}code-daily - @{{ username }}{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8 max-w-2xl">
-    <!-- Header -->
-    <header class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-white">code-daily</h1>
-        <p class="text-gray-400 mt-2">@{{ username }}</p>
+<div class="container mx-auto px-4 py-6 max-w-2xl">
+    <!-- Quick Stats Banner -->
+    <header class="card rounded-xl p-4 mb-6">
+        <div class="flex items-center justify-between">
+            <!-- Left: App title and user -->
+            <div class="flex items-center gap-3">
+                <h1 class="text-xl font-bold" style="color: var(--text-primary);">code-daily</h1>
+                <span class="text-sm" style="color: var(--text-muted);">@{{ username }}</span>
+            </div>
+
+            <!-- Right: Quick stats and theme toggle -->
+            <div class="flex items-center gap-4">
+                <!-- Today's commits -->
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full {% if goal.met %}bg-green-500{% else %}bg-orange-500{% endif %}"></div>
+                    <span class="text-sm font-medium" style="color: var(--text-secondary);">
+                        {{ stats.today }} today
+                    </span>
+                </div>
+
+                <!-- Current streak mini -->
+                <div class="flex items-center gap-1">
+                    <svg class="w-4 h-4" style="color: var(--accent-streak);" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z" clip-rule="evenodd"/>
+                    </svg>
+                    <span class="text-sm font-bold" style="color: var(--accent-streak);">{{ streak.current }}</span>
+                </div>
+
+                <!-- Theme toggle -->
+                <button onclick="toggleTheme()" class="theme-toggle p-2 rounded-lg" aria-label="Toggle theme">
+                    <!-- Sun icon (shown in dark mode) -->
+                    <svg id="sun-icon" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"/>
+                    </svg>
+                    <!-- Moon icon (shown in light mode) -->
+                    <svg id="moon-icon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
     </header>
 
-    <!-- Streak Section -->
-    <section class="bg-gray-800 rounded-lg p-8 mb-8 text-center">
-        <!-- Fire Visualization -->
-        <div class="mb-4 h-16 flex items-center justify-center">
+    <!-- Streak Progress Ring (Hero Section) -->
+    <section class="card rounded-xl p-8 mb-6 text-center">
+        <!-- SVG Progress Ring -->
+        <div class="relative inline-block mb-4">
+            {% set streak_pct = [streak.current * 3.33, 100] | min %}
             {% if streak.current >= 30 %}
-            <!-- Multiple flames with on-fire badge -->
-            <div class="fire-animate fire-glow">
-                <span class="text-5xl" data-fire="multi">🔥🔥🔥🔥</span>
-            </div>
+                {% set ring_class = "ring-animate" %}
+                {% set gradient_id = "gradient-gold" %}
             {% elif streak.current >= 14 %}
-            <!-- Triple flame -->
-            <div class="fire-animate fire-glow">
-                <span class="text-5xl" data-fire="triple">🔥🔥🔥</span>
-            </div>
+                {% set ring_class = "" %}
+                {% set gradient_id = "gradient-purple" %}
             {% elif streak.current >= 7 %}
-            <!-- Double flame -->
-            <div class="fire-animate">
-                <span class="text-5xl" data-fire="double">🔥🔥</span>
-            </div>
-            {% elif streak.current >= 1 %}
-            <!-- Single flame -->
-            <div class="fire-animate">
-                <span class="text-5xl" data-fire="single">🔥</span>
-            </div>
+                {% set ring_class = "" %}
+                {% set gradient_id = "gradient-green" %}
             {% else %}
-            <!-- No flame (dormant) -->
-            <div class="text-gray-600">
-                <span class="text-5xl" data-fire="none">💨</span>
-            </div>
+                {% set ring_class = "" %}
+                {% set gradient_id = "gradient-teal" %}
             {% endif %}
+
+            <svg class="w-48 h-48 {{ ring_class }}" viewBox="0 0 100 100">
+                <defs>
+                    <!-- Teal gradient (0-6 days) -->
+                    <linearGradient id="gradient-teal" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#14b8a6"/>
+                        <stop offset="100%" stop-color="#2dd4bf"/>
+                    </linearGradient>
+                    <!-- Green gradient (7-13 days) -->
+                    <linearGradient id="gradient-green" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#14b8a6"/>
+                        <stop offset="100%" stop-color="#22c55e"/>
+                    </linearGradient>
+                    <!-- Purple gradient (14-29 days) -->
+                    <linearGradient id="gradient-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#22c55e"/>
+                        <stop offset="100%" stop-color="#a855f7"/>
+                    </linearGradient>
+                    <!-- Gold gradient (30+ days) -->
+                    <linearGradient id="gradient-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#a855f7"/>
+                        <stop offset="50%" stop-color="#f59e0b"/>
+                        <stop offset="100%" stop-color="#a855f7"/>
+                    </linearGradient>
+                </defs>
+
+                <!-- Background circle -->
+                <circle
+                    cx="50" cy="50" r="42"
+                    fill="none"
+                    stroke="var(--bg-secondary)"
+                    stroke-width="8"
+                />
+
+                <!-- Progress circle -->
+                {% if streak.current > 0 %}
+                <circle
+                    cx="50" cy="50" r="42"
+                    fill="none"
+                    stroke="url(#{{ gradient_id }})"
+                    stroke-width="8"
+                    stroke-linecap="round"
+                    stroke-dasharray="{{ 264 * (streak_pct / 100) }} 264"
+                    transform="rotate(-90 50 50)"
+                    class="{% if streak.current >= 30 %}ring-pulse{% endif %}"
+                />
+                {% endif %}
+            </svg>
+
+            <!-- Center content -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <div class="text-5xl font-bold" style="color: var(--accent-streak);">
+                    {{ streak.current }}
+                </div>
+                <div class="text-sm" style="color: var(--text-muted);">day streak</div>
+            </div>
         </div>
 
-        <div class="text-7xl font-bold {% if streak.active %}text-orange-500{% else %}text-gray-500{% endif %}">
-            {{ streak.current }}
-        </div>
-        <div class="text-xl text-gray-400 mt-2">Current Streak</div>
-
-        <!-- Milestone Badges -->
+        <!-- Milestone Badge -->
         {% if streak.current >= 30 %}
-        <div class="mt-4">
-            <span class="badge-on-fire text-white text-sm font-bold px-4 py-1 rounded-full" data-badge="on-fire">
-                🏆 ON FIRE! 30+ days
-            </span>
+        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-white"
+             style="background: linear-gradient(135deg, #a855f7 0%, #f59e0b 100%);"
+             data-badge="on-fire">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+            </svg>
+            On Fire! 30+ days
+        </div>
+        {% elif streak.current >= 14 %}
+        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold"
+             style="background-color: var(--accent-achievement); color: white;"
+             data-badge="two-weeks">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            Two Week Streak!
         </div>
         {% elif streak.current >= 7 %}
-        <div class="mt-4">
-            <span class="bg-orange-600 text-white text-sm font-bold px-4 py-1 rounded-full" data-badge="week">
-                🎯 Week Streak!
-            </span>
+        <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold"
+             style="background-color: var(--accent-goal); color: white;"
+             data-badge="week">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            Week Streak!
         </div>
         {% endif %}
 
+        <!-- Streak warning -->
         {% if not streak.active and streak.current > 0 %}
-        <div class="text-sm text-yellow-500 mt-2">Commit today to keep your streak!</div>
+        <div class="mt-4 flex items-center justify-center gap-2 text-sm" style="color: var(--accent-warning);">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            Commit today to keep your streak!
+        </div>
         {% endif %}
-    </section>
-
-    <!-- Stats Grid -->
-    <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-            <div class="text-2xl font-bold text-white">{{ stats.today }}</div>
-            <div class="text-sm text-gray-400">Today</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-            <div class="text-2xl font-bold text-white">{{ stats.this_week }}</div>
-            <div class="text-sm text-gray-400">This Week</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-            <div class="text-2xl font-bold text-white">{{ stats.this_month }}</div>
-            <div class="text-sm text-gray-400">This Month</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-4 text-center">
-            <div class="text-2xl font-bold text-white">{{ stats.total }}</div>
-            <div class="text-sm text-gray-400">Total</div>
-        </div>
     </section>
 
     <!-- Daily Goal Progress -->
-    <section class="bg-gray-800 rounded-lg p-6 mb-8" data-goal>
+    <section class="card rounded-xl p-6 mb-6" data-goal>
         <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold text-white">Daily Goal</h2>
-            <button onclick="toggleGoalForm()" class="text-sm text-gray-400 hover:text-white" data-goal-edit-btn>
+            <h2 class="text-lg font-semibold" style="color: var(--text-primary);">Daily Goal</h2>
+            <button onclick="toggleGoalForm()" class="text-sm hover:opacity-80 transition-opacity" style="color: var(--text-muted);" data-goal-edit-btn>
                 Edit
             </button>
         </div>
@@ -99,22 +175,27 @@
         <!-- Goal Display -->
         <div data-goal-display>
             <!-- Progress Bar -->
-            <div class="w-full bg-gray-700 rounded-full h-4 mb-3">
+            <div class="w-full rounded-full h-3 mb-3" style="background-color: var(--bg-secondary);">
                 {% set progress_pct = (goal.today_progress / goal.daily * 100) | int %}
                 {% set capped_pct = [progress_pct, 100] | min %}
-                <div class="h-4 rounded-full transition-all duration-300 {% if goal.met %}bg-green-500{% else %}bg-orange-500{% endif %}"
-                     style="width: {{ capped_pct }}%"
+                <div class="h-3 rounded-full transition-all duration-500 progress-animate"
+                     style="width: {{ capped_pct }}%; background-color: {% if goal.met %}var(--accent-goal){% else %}var(--accent-warning){% endif %};"
                      data-goal-bar></div>
             </div>
 
             <!-- Progress Text -->
             <div class="flex items-center justify-between text-sm">
-                <span class="text-gray-300" data-goal-count>
+                <span style="color: var(--text-secondary);" data-goal-count>
                     {{ goal.today_progress }} / {{ goal.daily }} commit{% if goal.daily != 1 %}s{% endif %}
                 </span>
-                <span class="{% if goal.met %}text-green-400{% else %}text-orange-400{% endif %}" data-goal-status>
+                <span data-goal-status style="color: {% if goal.met %}var(--accent-goal){% else %}var(--accent-warning){% endif %};">
                     {% if goal.met %}
-                    Goal met!
+                    <span class="flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                        Goal met!
+                    </span>
                     {% else %}
                     {{ goal.daily - goal.today_progress }} more to reach your goal
                     {% endif %}
@@ -125,22 +206,44 @@
         <!-- Goal Edit Form (hidden by default) -->
         <form onsubmit="saveGoal(event)" class="hidden" data-goal-form>
             <div class="flex items-center gap-3">
-                <label for="goal-input" class="text-sm text-gray-400">Commits per day:</label>
+                <label for="goal-input" class="text-sm" style="color: var(--text-muted);">Commits per day:</label>
                 <input type="number" id="goal-input" name="goal" min="1" max="100" value="{{ goal.daily }}"
-                       class="w-20 px-3 py-1 bg-gray-700 border border-gray-600 rounded text-white text-center focus:outline-none focus:border-orange-500">
-                <button type="submit" class="px-4 py-1 bg-orange-500 hover:bg-orange-600 text-white text-sm rounded">
+                       class="input-field w-20 px-3 py-1 rounded text-center">
+                <button type="submit" class="px-4 py-1 rounded text-white text-sm transition-opacity hover:opacity-90"
+                        style="background-color: var(--accent-streak);">
                     Save
                 </button>
-                <button type="button" onclick="toggleGoalForm()" class="px-4 py-1 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded">
+                <button type="button" onclick="toggleGoalForm()" class="px-4 py-1 rounded text-sm transition-opacity hover:opacity-80"
+                        style="background-color: var(--bg-secondary); color: var(--text-secondary);">
                     Cancel
                 </button>
             </div>
         </form>
     </section>
 
+    <!-- Stats Grid -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="card stat-card rounded-xl p-4 text-center">
+            <div class="text-2xl font-bold" style="color: var(--text-primary);">{{ stats.this_week }}</div>
+            <div class="text-sm" style="color: var(--text-muted);">This Week</div>
+        </div>
+        <div class="card stat-card rounded-xl p-4 text-center">
+            <div class="text-2xl font-bold" style="color: var(--text-primary);">{{ stats.this_month }}</div>
+            <div class="text-sm" style="color: var(--text-muted);">This Month</div>
+        </div>
+        <div class="card stat-card rounded-xl p-4 text-center">
+            <div class="text-2xl font-bold" style="color: var(--text-primary);">{{ stats.total }}</div>
+            <div class="text-sm" style="color: var(--text-muted);">Total</div>
+        </div>
+        <div class="card stat-card rounded-xl p-4 text-center">
+            <div class="text-2xl font-bold" style="color: var(--text-primary);">{{ streak.longest }}</div>
+            <div class="text-sm" style="color: var(--text-muted);">Best Streak</div>
+        </div>
+    </section>
+
     <!-- Activity History Heatmap -->
-    <section class="bg-gray-800 rounded-lg p-6 mb-8" data-heatmap>
-        <h2 class="text-lg font-semibold text-white mb-4">Activity History</h2>
+    <section class="card rounded-xl p-6 mb-6" data-heatmap>
+        <h2 class="text-lg font-semibold mb-4" style="color: var(--text-primary);">Activity History</h2>
         <div class="heatmap-grid overflow-x-auto">
             <!-- Day labels -->
             <div class="heatmap-labels">
@@ -164,7 +267,7 @@
             </div>
         </div>
         <!-- Legend -->
-        <div class="flex items-center justify-end gap-2 mt-4 text-xs text-gray-400">
+        <div class="flex items-center justify-end gap-2 mt-4 text-xs" style="color: var(--text-muted);">
             <span>Less</span>
             <div class="heatmap-cell level-0"></div>
             <div class="heatmap-cell level-1"></div>
@@ -176,11 +279,11 @@
     </section>
 
     <!-- Achievements Section -->
-    <section class="bg-gray-800 rounded-lg p-6 mb-8" data-achievements>
+    <section class="card rounded-xl p-6 mb-6" data-achievements>
         <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold text-white">Achievements</h2>
+            <h2 class="text-lg font-semibold" style="color: var(--text-primary);">Achievements</h2>
             {% set unlocked_count = achievements | selectattr('unlocked') | list | length %}
-            <span class="text-sm text-gray-400" data-achievements-progress>
+            <span class="text-sm" style="color: var(--accent-achievement);" data-achievements-progress>
                 {{ unlocked_count }} / {{ achievements | length }} unlocked
             </span>
         </div>
@@ -188,8 +291,8 @@
         <!-- Achievements Grid -->
         <div class="grid grid-cols-5 gap-3" data-achievements-grid>
             {% for achievement in achievements %}
-            <div class="achievement-card relative group p-3 rounded-lg text-center transition-all duration-200
-                        {% if achievement.unlocked %}bg-gray-700 hover:bg-gray-600{% else %}bg-gray-900 opacity-50{% endif %}"
+            <div class="relative group p-3 rounded-lg text-center transition-all duration-200
+                        {% if achievement.unlocked %}achievement-unlocked hover:scale-105{% else %}achievement-locked{% endif %}"
                  data-achievement-id="{{ achievement.id }}"
                  data-unlocked="{{ 'true' if achievement.unlocked else 'false' }}">
                 <!-- Emoji -->
@@ -197,25 +300,28 @@
                     {{ achievement.emoji }}
                 </div>
                 <!-- Name -->
-                <div class="text-xs font-medium {% if achievement.unlocked %}text-white{% else %}text-gray-500{% endif %} truncate">
+                <div class="text-xs font-medium truncate"
+                     style="color: {% if achievement.unlocked %}var(--text-primary){% else %}var(--text-muted){% endif %};">
                     {{ achievement.name }}
                 </div>
 
                 <!-- Tooltip -->
-                <div class="achievement-tooltip absolute z-10 invisible group-hover:visible opacity-0 group-hover:opacity-100
+                <div class="absolute z-10 invisible group-hover:visible opacity-0 group-hover:opacity-100
                             transition-opacity duration-200 bottom-full left-1/2 transform -translate-x-1/2 mb-2
-                            bg-gray-900 text-white text-xs rounded-lg p-3 w-48 shadow-lg">
+                            text-xs rounded-lg p-3 w-48 shadow-lg"
+                     style="background-color: var(--bg-card); border: 1px solid var(--border-card); color: var(--text-primary);">
                     <div class="font-semibold mb-1">{{ achievement.name }}</div>
-                    <div class="text-gray-400 mb-1">{{ achievement.description }}</div>
+                    <div class="mb-1" style="color: var(--text-secondary);">{{ achievement.description }}</div>
                     {% if achievement.unlocked %}
-                    <div class="text-green-400 text-xs">
+                    <div style="color: var(--accent-goal);" class="text-xs">
                         Unlocked: {{ achievement.unlocked_at[:10] if achievement.unlocked_at else 'Unknown' }}
                     </div>
                     {% else %}
-                    <div class="text-gray-500 text-xs">Locked</div>
+                    <div style="color: var(--text-muted);" class="text-xs">Locked</div>
                     {% endif %}
                     <!-- Tooltip arrow -->
-                    <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-8 border-transparent border-t-gray-900"></div>
+                    <div class="absolute top-full left-1/2 transform -translate-x-1/2 border-8 border-transparent"
+                         style="border-top-color: var(--border-card);"></div>
                 </div>
             </div>
             {% endfor %}
@@ -223,7 +329,7 @@
     </section>
 
     <!-- Footer -->
-    <footer class="text-center text-gray-500 text-sm">
+    <footer class="text-center text-sm" style="color: var(--text-muted);">
         {% if streak.last_commit_date %}
         <p>Last commit: {{ streak.last_commit_date }}</p>
         {% else %}
