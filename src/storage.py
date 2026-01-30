@@ -70,6 +70,30 @@ class CommitStorage:
                     unlocked_value INTEGER
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS quests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    source_ref TEXT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ideas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             conn.commit()
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -289,6 +313,220 @@ class CommitStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM achievements")
             conn.commit()
+
+    # Quest methods
+    def get_quests(self, status: str | None = None, limit: int | None = None) -> list[dict]:
+        """
+        Get quests, optionally filtered by status.
+
+        Args:
+            status: Filter by status ('pending', 'active', 'completed', 'skipped', 'archived')
+            limit: Maximum number of quests to return
+
+        Returns:
+            List of quest dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM quests"
+            params: list = []
+
+            if status:
+                query += " WHERE status = ?"
+                params.append(status)
+
+            query += " ORDER BY created_at DESC"
+
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_quest(self, quest_id: int) -> dict | None:
+        """
+        Get a single quest by ID.
+
+        Args:
+            quest_id: The quest ID
+
+        Returns:
+            Quest dictionary or None if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM quests WHERE id = ?",
+                (quest_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_quest(
+        self,
+        title: str,
+        source: str = "manual",
+        source_ref: str | None = None,
+        description: str | None = None,
+    ) -> int:
+        """
+        Create a new quest.
+
+        Args:
+            title: Quest title
+            source: Source type ('manual', 'ideas_md', 'github_issue', 'todo_scan')
+            source_ref: Reference to the source (issue number, file:line, etc.)
+            description: Optional description
+
+        Returns:
+            ID of the created quest
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO quests (title, source, source_ref, description)
+                VALUES (?, ?, ?, ?)
+                """,
+                (title, source, source_ref, description),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_quest_status(self, quest_id: int, status: str) -> bool:
+        """
+        Update a quest's status.
+
+        Args:
+            quest_id: The quest ID
+            status: New status ('pending', 'active', 'completed', 'skipped', 'archived')
+
+        Returns:
+            True if quest was updated, False if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE quests
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status, quest_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_quest(self, quest_id: int) -> bool:
+        """
+        Delete a quest.
+
+        Args:
+            quest_id: The quest ID
+
+        Returns:
+            True if quest was deleted, False if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("DELETE FROM quests WHERE id = ?", (quest_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # Ideas methods
+    def get_ideas(self, status: str | None = None) -> list[dict]:
+        """
+        Get ideas, optionally filtered by status.
+
+        Args:
+            status: Filter by status ('active', 'promoted', 'completed', 'archived')
+
+        Returns:
+            List of idea dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM ideas WHERE status = ? ORDER BY created_at DESC",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM ideas ORDER BY created_at DESC"
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_idea(self, idea_id: int) -> dict | None:
+        """
+        Get a single idea by ID.
+
+        Args:
+            idea_id: The idea ID
+
+        Returns:
+            Idea dictionary or None if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM ideas WHERE id = ?",
+                (idea_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_idea(self, content: str) -> int:
+        """
+        Create a new idea.
+
+        Args:
+            content: Idea content/description
+
+        Returns:
+            ID of the created idea
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "INSERT INTO ideas (content) VALUES (?)",
+                (content,),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_idea_status(self, idea_id: int, status: str) -> bool:
+        """
+        Update an idea's status.
+
+        Args:
+            idea_id: The idea ID
+            status: New status ('active', 'promoted', 'completed', 'archived')
+
+        Returns:
+            True if idea was updated, False if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE ideas
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status, idea_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_idea(self, idea_id: int) -> bool:
+        """
+        Delete an idea.
+
+        Args:
+            idea_id: The idea ID
+
+        Returns:
+            True if idea was deleted, False if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
 
 def get_commit_events_with_history(

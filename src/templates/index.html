@@ -31,6 +31,17 @@
                     <span class="text-sm font-bold" style="color: var(--accent-streak);">{{ streak.current }}</span>
                 </div>
 
+                <!-- Refresh button -->
+                <button onclick="refreshData()" class="theme-toggle p-2 rounded-lg" aria-label="Refresh data" id="refresh-btn">
+                    <svg id="refresh-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    <svg id="refresh-spinner" class="w-5 h-5 hidden animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </button>
+
                 <!-- Theme toggle -->
                 <button onclick="toggleTheme()" class="theme-toggle p-2 rounded-lg" aria-label="Toggle theme">
                     <!-- Sun icon (shown in dark mode) -->
@@ -220,6 +231,148 @@
             </div>
         </form>
     </section>
+
+    <!-- Today's Quests -->
+    <section class="card rounded-xl p-6 mb-6" data-quests>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold" style="color: var(--text-primary);">Today's Quests</h2>
+            <div class="flex items-center gap-3">
+                <span class="text-sm" style="color: var(--text-muted);">
+                    {{ quests.summary.completed }} completed
+                </span>
+                <button onclick="toggleQuestForm()" class="text-sm px-3 py-1 rounded transition-opacity hover:opacity-90"
+                        style="background-color: var(--accent-streak); color: white;" data-quest-add-btn>
+                    + Add Quest
+                </button>
+            </div>
+        </div>
+
+        <!-- Add Quest Form (hidden by default) -->
+        <form onsubmit="addQuest(event)" class="hidden mb-4 p-4 rounded-lg" style="background-color: var(--bg-secondary);" data-quest-form>
+            <div class="space-y-3">
+                <div>
+                    <input type="text" id="quest-title" name="title" placeholder="What do you want to work on?"
+                           class="input-field w-full px-3 py-2 rounded" required>
+                </div>
+                <div>
+                    <textarea id="quest-description" name="description" placeholder="Optional description..."
+                              class="input-field w-full px-3 py-2 rounded resize-none" rows="2"></textarea>
+                </div>
+                <div class="flex gap-2">
+                    <button type="submit" class="px-4 py-2 rounded text-white text-sm transition-opacity hover:opacity-90"
+                            style="background-color: var(--accent-streak);">
+                        Add Quest
+                    </button>
+                    <button type="button" onclick="toggleQuestForm()" class="px-4 py-2 rounded text-sm transition-opacity hover:opacity-80"
+                            style="background-color: var(--bg-card); color: var(--text-secondary); border: 1px solid var(--border-card);">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <!-- Active Quests -->
+        {% if quests.active %}
+        <div class="mb-4">
+            <h3 class="text-sm font-medium mb-2" style="color: var(--accent-goal);">In Progress</h3>
+            <div class="space-y-2">
+                {% for quest in quests.active %}
+                <div class="flex items-center justify-between p-3 rounded-lg" style="background-color: var(--bg-secondary); border-left: 3px solid var(--accent-goal);">
+                    <div class="flex-1">
+                        <div class="font-medium" style="color: var(--text-primary);">{{ quest.title }}</div>
+                        {% if quest.description %}
+                        <div class="text-sm mt-1" style="color: var(--text-muted);">{{ quest.description }}</div>
+                        {% endif %}
+                    </div>
+                    <button onclick="completeQuest({{ quest.id }})"
+                            class="ml-3 px-3 py-1 rounded text-sm font-medium transition-opacity hover:opacity-90"
+                            style="background-color: var(--accent-goal); color: white;">
+                        Complete
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Pending Quests -->
+        {% if quests.pending %}
+        <div class="space-y-2" data-quest-list>
+            {% for quest in quests.pending %}
+            <div class="flex items-center justify-between p-3 rounded-lg quest-item" style="background-color: var(--bg-secondary);" data-quest-id="{{ quest.id }}">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                        <span class="font-medium" style="color: var(--text-primary);">{{ quest.title }}</span>
+                        <span class="text-xs px-2 py-0.5 rounded" style="background-color: var(--bg-card); color: var(--text-muted);">
+                            {{ quest.source }}
+                        </span>
+                    </div>
+                    {% if quest.description %}
+                    <div class="text-sm mt-1" style="color: var(--text-muted);">{{ quest.description }}</div>
+                    {% endif %}
+                </div>
+                <div class="flex items-center gap-2 ml-3">
+                    <button onclick="acceptQuest({{ quest.id }})"
+                            class="px-3 py-1 rounded text-sm font-medium transition-opacity hover:opacity-90"
+                            style="background-color: var(--accent-streak); color: white;">
+                        Start
+                    </button>
+                    <button onclick="showSkipOptions({{ quest.id }})"
+                            class="px-3 py-1 rounded text-sm transition-opacity hover:opacity-80"
+                            style="background-color: var(--bg-card); color: var(--text-muted); border: 1px solid var(--border-card);">
+                        Skip
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        {% if not quests.active %}
+        <div class="text-center py-8" style="color: var(--text-muted);">
+            <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+            </svg>
+            <p class="text-sm">No quests yet. Add one to get started!</p>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <!-- Quick Add Idea -->
+        <div class="mt-4 pt-4" style="border-top: 1px solid var(--border-card);">
+            <form onsubmit="addIdea(event)" class="flex gap-2">
+                <input type="text" id="idea-input" name="content" placeholder="Quick idea..."
+                       class="input-field flex-1 px-3 py-2 rounded text-sm">
+                <button type="submit" class="px-4 py-2 rounded text-sm transition-opacity hover:opacity-90"
+                        style="background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-card);">
+                    Save Idea
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <!-- Skip Quest Modal -->
+    <div id="skip-modal" class="fixed inset-0 z-50 hidden items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
+        <div class="card rounded-xl p-6 max-w-sm mx-4" style="background-color: var(--bg-card);">
+            <h3 class="text-lg font-semibold mb-4" style="color: var(--text-primary);">Skip Quest</h3>
+            <p class="text-sm mb-4" style="color: var(--text-secondary);">What would you like to do with this quest?</p>
+            <div class="space-y-2">
+                <button onclick="skipQuest('archive', false)" class="w-full p-3 rounded-lg text-left transition-opacity hover:opacity-80"
+                        style="background-color: var(--bg-secondary); color: var(--text-primary);">
+                    <div class="font-medium">Archive</div>
+                    <div class="text-xs" style="color: var(--text-muted);">Remove from queue, won't resurface</div>
+                </button>
+                <button onclick="skipQuest('skip', true)" class="w-full p-3 rounded-lg text-left transition-opacity hover:opacity-80"
+                        style="background-color: var(--bg-secondary); color: var(--text-primary);">
+                    <div class="font-medium">Save as Idea</div>
+                    <div class="text-xs" style="color: var(--text-muted);">Save to IDEAS.md for later</div>
+                </button>
+                <button onclick="hideSkipModal()" class="w-full p-3 rounded-lg text-center transition-opacity hover:opacity-80"
+                        style="color: var(--text-muted);">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Stats Grid -->
     <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

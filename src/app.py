@@ -18,6 +18,8 @@ from src.stats_calculator import calculate_stats
 from src.history_calculator import calculate_history
 from src.storage import CommitStorage, get_commit_events_with_history
 from src.achievements import check_achievements, get_all_achievements_status
+from src.quest_manager import QuestManager
+from src.ideas import read_ideas, add_idea, sync_ideas_to_db
 
 app = FastAPI(
     title="code-daily",
@@ -35,6 +37,26 @@ class GoalUpdate(BaseModel):
     """Request model for updating the daily goal."""
 
     goal: int = Field(..., ge=1, le=100, description="Daily commit goal (1-100)")
+
+
+class QuestCreate(BaseModel):
+    """Request model for creating a quest."""
+
+    title: str = Field(..., min_length=1, max_length=500, description="Quest title")
+    description: str | None = Field(None, max_length=2000, description="Optional description")
+
+
+class QuestSkip(BaseModel):
+    """Request model for skipping a quest."""
+
+    action: str = Field("archive", description="Skip action: 'archive' or 'skip'")
+    save_as_idea: bool = Field(False, description="Save quest as idea before skipping")
+
+
+class IdeaCreate(BaseModel):
+    """Request model for creating an idea."""
+
+    content: str = Field(..., min_length=1, max_length=1000, description="Idea content")
 
 
 @app.get("/health")
@@ -139,6 +161,19 @@ def index(request: Request):
     data = _fetch_stats_data()
     # Add history data for heatmap
     data["history"] = calculate_history(data.get("commit_events", []))
+
+    # Add quest data
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+    data["quests"] = {
+        "pending": quest_manager.get_pending_quests(limit=5),
+        "active": quest_manager.get_active_quests(),
+        "summary": quest_manager.get_quest_summary(),
+    }
+
+    # Add ideas data
+    data["ideas"] = storage.get_ideas(status="active")
+
     return templates.TemplateResponse(request, "index.html", data)
 
 
@@ -228,3 +263,189 @@ def get_achievements():
             "unlocked": unlocked_count,
         },
     }
+
+
+# Quest API endpoints
+@app.get("/api/quests")
+def get_quests():
+    """
+    Get quests with summary.
+
+    Returns:
+        JSON with pending quests, active quests, and summary
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    return {
+        "pending": quest_manager.get_pending_quests(limit=5),
+        "active": quest_manager.get_active_quests(),
+        "summary": quest_manager.get_quest_summary(),
+    }
+
+
+@app.post("/api/quests")
+def create_quest(quest: QuestCreate):
+    """
+    Create a new manual quest.
+
+    Args:
+        quest: QuestCreate with title and optional description
+
+    Returns:
+        JSON with the created quest
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    created = quest_manager.add_manual_quest(
+        title=quest.title,
+        description=quest.description,
+    )
+
+    return {"quest": created}
+
+
+@app.post("/api/quests/{quest_id}/accept")
+def accept_quest(quest_id: int):
+    """
+    Accept a quest (mark as active).
+
+    Args:
+        quest_id: The quest ID
+
+    Returns:
+        JSON with the updated quest
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    quest = quest_manager.accept_quest(quest_id)
+    if not quest:
+        raise HTTPException(status_code=404, detail="Quest not found")
+
+    return {"quest": quest}
+
+
+@app.post("/api/quests/{quest_id}/complete")
+def complete_quest(quest_id: int):
+    """
+    Complete a quest.
+
+    Args:
+        quest_id: The quest ID
+
+    Returns:
+        JSON with the updated quest
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    quest = quest_manager.complete_quest(quest_id)
+    if not quest:
+        raise HTTPException(status_code=404, detail="Quest not found")
+
+    return {"quest": quest}
+
+
+@app.post("/api/quests/{quest_id}/skip")
+def skip_quest(quest_id: int, skip_data: QuestSkip | None = None):
+    """
+    Skip a quest with optional save-as-idea.
+
+    Args:
+        quest_id: The quest ID
+        skip_data: Optional skip configuration
+
+    Returns:
+        JSON with skip result
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    if skip_data is None:
+        skip_data = QuestSkip()
+
+    result = quest_manager.skip_quest(
+        quest_id=quest_id,
+        action=skip_data.action,
+        save_as_idea=skip_data.save_as_idea,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Quest not found"))
+
+    return result
+
+
+# Ideas API endpoints
+@app.get("/api/ideas")
+def get_ideas():
+    """
+    Get all active ideas.
+
+    Returns:
+        JSON with ideas list
+    """
+    storage = CommitStorage()
+    ideas = storage.get_ideas(status="active")
+
+    return {"ideas": ideas}
+
+
+@app.post("/api/ideas")
+def create_idea(idea: IdeaCreate):
+    """
+    Create a new idea (adds to both database and IDEAS.md).
+
+    Args:
+        idea: IdeaCreate with content
+
+    Returns:
+        JSON with the created idea
+    """
+    storage = CommitStorage()
+
+    # Add to database
+    idea_id = storage.create_idea(idea.content)
+
+    # Add to IDEAS.md file
+    add_idea(idea.content)
+
+    created = storage.get_idea(idea_id)
+    return {"idea": created}
+
+
+@app.post("/api/ideas/{idea_id}/promote")
+def promote_idea(idea_id: int):
+    """
+    Promote an idea to a quest.
+
+    Args:
+        idea_id: The idea ID
+
+    Returns:
+        JSON with the created quest
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    quest = quest_manager.promote_idea_to_quest(idea_id)
+    if not quest:
+        raise HTTPException(status_code=404, detail="Idea not found")
+
+    return {"quest": quest}
+
+
+@app.post("/api/ideas/sync")
+def sync_ideas():
+    """
+    Sync ideas between IDEAS.md and database.
+
+    Returns:
+        JSON with sync statistics
+    """
+    storage = CommitStorage()
+    result = sync_ideas_to_db(storage)
+
+    return result
