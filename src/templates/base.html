@@ -7,61 +7,272 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
-        @keyframes flicker {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            25% { opacity: 0.9; transform: scale(1.02); }
-            50% { opacity: 0.85; transform: scale(1.05); }
-            75% { opacity: 0.9; transform: scale(1.02); }
+        /* CSS Custom Properties for Theme System */
+        :root {
+            /* Light mode colors */
+            --bg-primary: #f8fafc;
+            --bg-secondary: #f1f5f9;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f8fafc;
+            --bg-input: #f1f5f9;
+            --border-card: #e2e8f0;
+            --border-input: #cbd5e1;
+
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+
+            /* Semantic colors */
+            --accent-streak: #14b8a6;
+            --accent-streak-light: #2dd4bf;
+            --accent-goal: #22c55e;
+            --accent-goal-light: #4ade80;
+            --accent-achievement: #a855f7;
+            --accent-achievement-light: #c084fc;
+            --accent-warning: #f97316;
+            --accent-warning-light: #fb923c;
+
+            /* Heatmap colors (teal scale for light mode) */
+            --heatmap-0: #e2e8f0;
+            --heatmap-1: #99f6e4;
+            --heatmap-2: #5eead4;
+            --heatmap-3: #2dd4bf;
+            --heatmap-4: #14b8a6;
+
+            /* Shadow */
+            --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+            --shadow-card-hover: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
-        .fire-animate {
-            animation: flicker 1.5s ease-in-out infinite;
-            display: inline-block;
+
+        .dark {
+            /* Dark mode colors */
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --bg-input: #334155;
+            --border-card: #334155;
+            --border-input: #475569;
+
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5e1;
+            --text-muted: #64748b;
+
+            /* Semantic colors stay the same */
+            --accent-streak: #14b8a6;
+            --accent-streak-light: #2dd4bf;
+            --accent-goal: #22c55e;
+            --accent-goal-light: #4ade80;
+            --accent-achievement: #a855f7;
+            --accent-achievement-light: #c084fc;
+            --accent-warning: #f97316;
+            --accent-warning-light: #fb923c;
+
+            /* Heatmap colors (teal scale for dark mode) */
+            --heatmap-0: #1e293b;
+            --heatmap-1: #115e59;
+            --heatmap-2: #0d9488;
+            --heatmap-3: #14b8a6;
+            --heatmap-4: #2dd4bf;
+
+            /* Shadow */
+            --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+            --shadow-card-hover: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
         }
-        @keyframes pulse-glow {
-            0%, 100% { filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.6)); }
-            50% { filter: drop-shadow(0 0 16px rgba(249, 115, 22, 0.9)); }
+
+        /* Base styles using CSS variables */
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
-        .fire-glow {
-            animation: pulse-glow 2s ease-in-out infinite;
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-card);
+            box-shadow: var(--shadow-card);
+            transition: all 0.2s ease;
         }
-        .badge-on-fire {
-            background: linear-gradient(135deg, #f97316 0%, #dc2626 100%);
+
+        .card:hover {
+            box-shadow: var(--shadow-card-hover);
         }
+
+        /* Streak ring animations */
+        @keyframes ring-rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes ring-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .ring-animate {
+            animation: ring-rotate 8s linear infinite;
+        }
+
+        .ring-pulse {
+            animation: ring-pulse 2s ease-in-out infinite;
+        }
+
+        /* Progress bar animation */
+        @keyframes progress-fill {
+            from { width: 0%; }
+        }
+
+        .progress-animate {
+            animation: progress-fill 0.8s ease-out;
+        }
+
         /* Heatmap styles */
         .heatmap-grid {
             display: flex;
             gap: 4px;
         }
+
         .heatmap-labels {
             display: grid;
             grid-template-rows: repeat(7, 12px);
             gap: 2px;
             font-size: 10px;
-            color: #9ca3af;
+            color: var(--text-muted);
             padding-right: 4px;
         }
+
         .heatmap-cells {
             display: grid;
             grid-template-rows: repeat(7, 12px);
             grid-auto-flow: column;
             gap: 2px;
         }
+
         .heatmap-cell {
             width: 12px;
             height: 12px;
             border-radius: 2px;
+            transition: background-color 0.2s ease;
         }
-        .level-0 { background-color: #1e293b; }
-        .level-1 { background-color: #064e3b; }
-        .level-2 { background-color: #047857; }
-        .level-3 { background-color: #10b981; }
-        .level-4 { background-color: #34d399; }
+
+        .level-0 { background-color: var(--heatmap-0); }
+        .level-1 { background-color: var(--heatmap-1); }
+        .level-2 { background-color: var(--heatmap-2); }
+        .level-3 { background-color: var(--heatmap-3); }
+        .level-4 { background-color: var(--heatmap-4); }
+
+        /* Achievement styles */
+        .achievement-unlocked {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(168, 85, 247, 0.05) 100%);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+
+        .achievement-locked {
+            background-color: var(--bg-secondary);
+            opacity: 0.5;
+        }
+
+        /* Theme toggle button */
+        .theme-toggle {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-card);
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+        }
+
+        .theme-toggle:hover {
+            background-color: var(--bg-card-hover);
+            color: var(--text-primary);
+        }
+
+        /* Input styles */
+        .input-field {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-input);
+            color: var(--text-primary);
+            transition: border-color 0.2s ease;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--accent-streak);
+        }
+
+        /* Stat card accents */
+        .stat-card {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-streak), var(--accent-streak-light));
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-white min-h-screen">
+<body class="min-h-screen">
     {% block content %}{% endblock %}
 
     <script>
+        // Theme management
+        function getSystemTheme() {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function getStoredTheme() {
+            return localStorage.getItem('theme');
+        }
+
+        function setTheme(theme) {
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+            localStorage.setItem('theme', theme);
+            updateThemeIcon(theme);
+        }
+
+        function updateThemeIcon(theme) {
+            const sunIcon = document.getElementById('sun-icon');
+            const moonIcon = document.getElementById('moon-icon');
+            if (sunIcon && moonIcon) {
+                if (theme === 'dark') {
+                    sunIcon.classList.remove('hidden');
+                    moonIcon.classList.add('hidden');
+                } else {
+                    sunIcon.classList.add('hidden');
+                    moonIcon.classList.remove('hidden');
+                }
+            }
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+            setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+        }
+
+        // Initialize theme on page load
+        (function() {
+            const storedTheme = getStoredTheme();
+            const theme = storedTheme || getSystemTheme();
+            setTheme(theme);
+        })();
+
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!getStoredTheme()) {
+                setTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+
+        // Goal form functions
         function toggleGoalForm() {
             const display = document.querySelector('[data-goal-display]');
             const form = document.querySelector('[data-goal-form]');
