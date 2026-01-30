@@ -272,6 +272,61 @@
             }
         });
 
+        // Refresh data function
+        async function refreshData() {
+            const refreshBtn = document.getElementById('refresh-btn');
+            const refreshIcon = document.getElementById('refresh-icon');
+            const refreshSpinner = document.getElementById('refresh-spinner');
+
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                if (refreshIcon) refreshIcon.classList.add('hidden');
+                if (refreshSpinner) refreshSpinner.classList.remove('hidden');
+            }
+
+            try {
+                // Force a fresh fetch by adding a cache-busting parameter
+                const response = await fetch(window.location.href, {
+                    headers: { 'Cache-Control': 'no-cache' }
+                });
+                if (response.ok) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                console.error('Refresh failed:', error);
+                // Reset button state on error
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    if (refreshIcon) refreshIcon.classList.remove('hidden');
+                    if (refreshSpinner) refreshSpinner.classList.add('hidden');
+                }
+            }
+        }
+
+        // Auto-retry logic: if commits today is 0 and it's past noon, retry after 60 seconds
+        (function autoRetryCheck() {
+            const todayText = document.querySelector('[data-goal-count]');
+            if (todayText) {
+                const match = todayText.textContent.match(/(\d+)\s*\/\s*\d+/);
+                const commitsToday = match ? parseInt(match[1], 10) : null;
+                const hour = new Date().getHours();
+
+                // If 0 commits today and it's past noon, auto-retry once after 60 seconds
+                if (commitsToday === 0 && hour >= 12) {
+                    const hasRetried = sessionStorage.getItem('autoRetried');
+                    if (!hasRetried) {
+                        sessionStorage.setItem('autoRetried', 'true');
+                        setTimeout(() => {
+                            refreshData();
+                        }, 60000); // 60 seconds
+                    }
+                } else {
+                    // Reset retry flag if commits exist or it's before noon
+                    sessionStorage.removeItem('autoRetried');
+                }
+            }
+        })();
+
         // Goal form functions
         function toggleGoalForm() {
             const display = document.querySelector('[data-goal-display]');
@@ -316,6 +371,164 @@
                 alert('Error saving goal: ' + error.message);
             }
         }
+
+        // Quest functions
+        function toggleQuestForm() {
+            const form = document.querySelector('[data-quest-form]');
+            const addBtn = document.querySelector('[data-quest-add-btn]');
+
+            if (form.classList.contains('hidden')) {
+                form.classList.remove('hidden');
+                addBtn.classList.add('hidden');
+                document.getElementById('quest-title').focus();
+            } else {
+                form.classList.add('hidden');
+                addBtn.classList.remove('hidden');
+                document.getElementById('quest-title').value = '';
+                document.getElementById('quest-description').value = '';
+            }
+        }
+
+        async function addQuest(event) {
+            event.preventDefault();
+            const title = document.getElementById('quest-title').value.trim();
+            const description = document.getElementById('quest-description').value.trim();
+
+            if (!title) {
+                alert('Please enter a quest title');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/quests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, description: description || null })
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert('Error: ' + (data.detail || 'Failed to create quest'));
+                }
+            } catch (error) {
+                alert('Error creating quest: ' + error.message);
+            }
+        }
+
+        async function acceptQuest(questId) {
+            try {
+                const response = await fetch(`/api/quests/${questId}/accept`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert('Error: ' + (data.detail || 'Failed to accept quest'));
+                }
+            } catch (error) {
+                alert('Error accepting quest: ' + error.message);
+            }
+        }
+
+        async function completeQuest(questId) {
+            try {
+                const response = await fetch(`/api/quests/${questId}/complete`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert('Error: ' + (data.detail || 'Failed to complete quest'));
+                }
+            } catch (error) {
+                alert('Error completing quest: ' + error.message);
+            }
+        }
+
+        let currentSkipQuestId = null;
+
+        function showSkipOptions(questId) {
+            currentSkipQuestId = questId;
+            const modal = document.getElementById('skip-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function hideSkipModal() {
+            currentSkipQuestId = null;
+            const modal = document.getElementById('skip-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function skipQuest(action, saveAsIdea) {
+            if (!currentSkipQuestId) return;
+
+            try {
+                const response = await fetch(`/api/quests/${currentSkipQuestId}/skip`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, save_as_idea: saveAsIdea })
+                });
+
+                if (response.ok) {
+                    hideSkipModal();
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert('Error: ' + (data.detail || 'Failed to skip quest'));
+                }
+            } catch (error) {
+                alert('Error skipping quest: ' + error.message);
+            }
+        }
+
+        // Ideas functions
+        async function addIdea(event) {
+            event.preventDefault();
+            const input = document.getElementById('idea-input');
+            const content = input.value.trim();
+
+            if (!content) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/ideas', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content })
+                });
+
+                if (response.ok) {
+                    input.value = '';
+                    // Show brief success feedback
+                    input.placeholder = 'Idea saved!';
+                    setTimeout(() => {
+                        input.placeholder = 'Quick idea...';
+                    }, 2000);
+                } else {
+                    const data = await response.json();
+                    alert('Error: ' + (data.detail || 'Failed to save idea'));
+                }
+            } catch (error) {
+                alert('Error saving idea: ' + error.message);
+            }
+        }
+
+        // Close skip modal when clicking outside
+        document.addEventListener('click', function(event) {
+            const modal = document.getElementById('skip-modal');
+            if (modal && event.target === modal) {
+                hideSkipModal();
+            }
+        });
     </script>
 </body>
 </html>
