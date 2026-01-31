@@ -72,3 +72,45 @@ class GitHubClient:
             )
 
         return response.json()
+
+    def get_assigned_issues(self, state: str = "open", per_page: int = 30) -> list[dict]:
+        """
+        Fetch issues assigned to the authenticated user.
+
+        Args:
+            state: Issue state filter ('open', 'closed', 'all')
+            per_page: Number of issues to fetch (max 100)
+
+        Returns:
+            List of issue dictionaries from the GitHub API
+
+        Raises:
+            GitHubClientError: If the API request fails
+        """
+        url = f"{self.BASE_URL}/issues"
+        params = {
+            "filter": "assigned",
+            "state": state,
+            "per_page": min(per_page, 100),
+            "sort": "updated",
+            "direction": "desc",
+        }
+
+        response = self.session.get(url, params=params)
+
+        if response.status_code == 401:
+            raise GitHubClientError(
+                "Authentication failed. Check your GITHUB_TOKEN is valid."
+            )
+        elif response.status_code == 403:
+            remaining = response.headers.get("X-RateLimit-Remaining", "unknown")
+            raise GitHubClientError(
+                f"API rate limit exceeded or access forbidden. "
+                f"Remaining requests: {remaining}"
+            )
+        elif not response.ok:
+            raise GitHubClientError(
+                f"GitHub API error: {response.status_code} - {response.text}"
+            )
+
+        return response.json()

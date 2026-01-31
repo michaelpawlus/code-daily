@@ -86,6 +86,9 @@ class CommitStorage:
                 CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status)
             """)
             conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_quests_source_ref ON quests(source, source_ref)
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS ideas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     content TEXT NOT NULL,
@@ -391,6 +394,26 @@ class CommitStorage:
             )
             conn.commit()
             return cursor.lastrowid
+
+    def quest_exists_by_source_ref(self, source: str, source_ref: str) -> bool:
+        """
+        Check if a quest with given source and source_ref exists.
+
+        Used for deduplication when syncing external sources like GitHub issues.
+
+        Args:
+            source: Source type (e.g., 'github_issue')
+            source_ref: Reference to the source (e.g., issue URL)
+
+        Returns:
+            True if quest exists, False otherwise
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM quests WHERE source = ? AND source_ref = ? LIMIT 1",
+                (source, source_ref),
+            ).fetchone()
+        return row is not None
 
     def update_quest_status(self, quest_id: int, status: str) -> bool:
         """
