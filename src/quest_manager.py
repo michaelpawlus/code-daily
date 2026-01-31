@@ -157,6 +157,63 @@ class QuestManager:
 
         return self.storage.get_quest(quest_id)
 
+    def sync_github_issues(self, issues: list[dict]) -> dict:
+        """
+        Sync GitHub issues to quests, skipping duplicates.
+
+        Creates new quests from GitHub issues that haven't been synced before.
+        Pull requests are filtered out (they appear in /issues API but have 'pull_request' key).
+
+        Args:
+            issues: List of issue dictionaries from GitHub API
+
+        Returns:
+            Dictionary with 'added' and 'skipped' counts
+        """
+        added = 0
+        skipped = 0
+
+        for issue in issues:
+            # Skip pull requests (they appear in /issues API with a pull_request key)
+            if "pull_request" in issue:
+                continue
+
+            issue_url = issue.get("html_url", "")
+            if not issue_url:
+                continue
+
+            # Check if we already have a quest for this issue
+            if self.storage.quest_exists_by_source_ref("github_issue", issue_url):
+                skipped += 1
+                continue
+
+            # Extract repo name from URL: https://github.com/owner/repo/issues/123
+            repo_name = ""
+            if "github.com/" in issue_url:
+                parts = issue_url.split("github.com/")[1].split("/")
+                if len(parts) >= 2:
+                    repo_name = f"{parts[0]}/{parts[1]}"
+
+            # Build title with repo prefix
+            title = issue.get("title", "Untitled issue")
+            if repo_name:
+                title = f"[{repo_name}] {title}"
+
+            # Truncate description to 200 chars
+            description = issue.get("body") or ""
+            if len(description) > 200:
+                description = description[:197] + "..."
+
+            self.storage.create_quest(
+                title=title,
+                source="github_issue",
+                source_ref=issue_url,
+                description=description if description else None,
+            )
+            added += 1
+
+        return {"added": added, "skipped": skipped}
+
     def get_quest_summary(self) -> dict:
         """
         Get a summary of quest counts by status.
@@ -181,3 +238,42 @@ class QuestManager:
                 summary[status] += 1
 
         return summary
+
+    def sync_todo_comments(self, todos: list) -> dict:
+        """
+        Sync TODO/FIXME comments to quests, skipping duplicates.
+
+        Creates new quests from TODO comments that haven't been synced before.
+
+        Args:
+            todos: List of TodoComment objects from the scanner
+
+        Returns:
+            Dictionary with 'added' and 'skipped' counts
+        """
+        added = 0
+        skipped = 0
+
+        for todo in todos:
+            source_ref = todo.source_ref
+
+            # Check if we already have a quest for this TODO
+            if self.storage.quest_exists_by_source_ref("todo_scan", source_ref):
+                skipped += 1
+                continue
+
+            # Build title with comment type prefix
+            title = f"[{todo.comment_type}] {todo.content}"
+
+            # Truncate title if too long
+            if len(title) > 200:
+                title = title[:197] + "..."
+
+            self.storage.create_quest(
+                title=title,
+                source="todo_scan",
+                source_ref=source_ref,
+            )
+            added += 1
+
+        return {"added": added, "skipped": skipped}
