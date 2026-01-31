@@ -142,3 +142,93 @@ class TestGitHubClient:
 
         call_args = mock_get.call_args
         assert call_args[1]["params"]["per_page"] == 100
+
+
+class TestGitHubClientAssignedIssues:
+    """Tests for fetching assigned issues."""
+
+    @patch("requests.Session.get")
+    def test_get_assigned_issues_success(self, mock_get):
+        """Should return issues on successful API call."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "id": 1,
+                "title": "Test Issue",
+                "html_url": "https://github.com/user/repo/issues/1",
+                "body": "Issue description",
+            }
+        ]
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        issues = client.get_assigned_issues()
+
+        assert len(issues) == 1
+        assert issues[0]["title"] == "Test Issue"
+        mock_get.assert_called_once()
+
+        # Verify correct endpoint and params
+        call_args = mock_get.call_args
+        assert "/issues" in call_args[0][0]
+        assert call_args[1]["params"]["filter"] == "assigned"
+        assert call_args[1]["params"]["state"] == "open"
+
+    @patch("requests.Session.get")
+    def test_get_assigned_issues_auth_failure(self, mock_get):
+        """Should raise error on 401 unauthorized."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 401
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("bad_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="Authentication failed"):
+            client.get_assigned_issues()
+
+    @patch("requests.Session.get")
+    def test_get_assigned_issues_rate_limit(self, mock_get):
+        """Should raise error on 403 rate limit."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 403
+        mock_response.headers = {"X-RateLimit-Remaining": "0"}
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="rate limit"):
+            client.get_assigned_issues()
+
+    @patch("requests.Session.get")
+    def test_get_assigned_issues_respects_state(self, mock_get):
+        """Should pass state parameter to API."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        client.get_assigned_issues(state="closed")
+
+        call_args = mock_get.call_args
+        assert call_args[1]["params"]["state"] == "closed"
+
+    @patch("requests.Session.get")
+    def test_get_assigned_issues_caps_per_page_at_100(self, mock_get):
+        """Should cap per_page at 100 (GitHub's max)."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        client.get_assigned_issues(per_page=200)
+
+        call_args = mock_get.call_args
+        assert call_args[1]["params"]["per_page"] == 100

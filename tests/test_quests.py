@@ -320,3 +320,165 @@ class TestQuestManager:
         assert summary["pending"] == 1
         assert summary["active"] == 1
         assert summary["completed"] == 1
+
+
+class TestGitHubIssuesSync:
+    """Tests for GitHub issues sync functionality."""
+
+    def test_quest_exists_by_source_ref(self, storage):
+        """Can check if quest exists by source and source_ref."""
+        storage.create_quest(
+            title="Test quest",
+            source="github_issue",
+            source_ref="https://github.com/user/repo/issues/1",
+        )
+
+        assert storage.quest_exists_by_source_ref(
+            "github_issue", "https://github.com/user/repo/issues/1"
+        )
+        assert not storage.quest_exists_by_source_ref(
+            "github_issue", "https://github.com/user/repo/issues/2"
+        )
+        assert not storage.quest_exists_by_source_ref(
+            "manual", "https://github.com/user/repo/issues/1"
+        )
+
+    def test_sync_creates_quest_from_issue(self, quest_manager, storage):
+        """Syncing issues creates quests correctly."""
+        issues = [
+            {
+                "id": 1,
+                "title": "Fix login bug",
+                "html_url": "https://github.com/user/myrepo/issues/1",
+                "body": "The login button doesn't work",
+            }
+        ]
+
+        result = quest_manager.sync_github_issues(issues)
+
+        assert result["added"] == 1
+        assert result["skipped"] == 0
+
+        quests = storage.get_quests()
+        assert len(quests) == 1
+        assert quests[0]["title"] == "[user/myrepo] Fix login bug"
+        assert quests[0]["source"] == "github_issue"
+        assert quests[0]["source_ref"] == "https://github.com/user/myrepo/issues/1"
+        assert quests[0]["description"] == "The login button doesn't work"
+
+    def test_sync_skips_existing_issues(self, quest_manager, storage):
+        """Syncing doesn't duplicate existing issues."""
+        # Create an existing quest for this issue
+        storage.create_quest(
+            title="[user/repo] Existing issue",
+            source="github_issue",
+            source_ref="https://github.com/user/repo/issues/1",
+        )
+
+        issues = [
+            {
+                "id": 1,
+                "title": "Existing issue",
+                "html_url": "https://github.com/user/repo/issues/1",
+                "body": "Already synced",
+            },
+            {
+                "id": 2,
+                "title": "New issue",
+                "html_url": "https://github.com/user/repo/issues/2",
+                "body": "Not synced yet",
+            },
+        ]
+
+        result = quest_manager.sync_github_issues(issues)
+
+        assert result["added"] == 1
+        assert result["skipped"] == 1
+
+        quests = storage.get_quests()
+        assert len(quests) == 2
+
+    def test_sync_skips_pull_requests(self, quest_manager, storage):
+        """Syncing filters out pull requests."""
+        issues = [
+            {
+                "id": 1,
+                "title": "Regular issue",
+                "html_url": "https://github.com/user/repo/issues/1",
+                "body": "This is an issue",
+            },
+            {
+                "id": 2,
+                "title": "Pull request",
+                "html_url": "https://github.com/user/repo/pull/2",
+                "body": "This is a PR",
+                "pull_request": {
+                    "url": "https://api.github.com/repos/user/repo/pulls/2"
+                },
+            },
+        ]
+
+        result = quest_manager.sync_github_issues(issues)
+
+        assert result["added"] == 1
+        assert result["skipped"] == 0
+
+        quests = storage.get_quests()
+        assert len(quests) == 1
+        assert "Pull request" not in quests[0]["title"]
+
+    def test_sync_truncates_long_descriptions(self, quest_manager, storage):
+        """Syncing truncates descriptions over 200 chars."""
+        long_body = "x" * 300
+
+        issues = [
+            {
+                "id": 1,
+                "title": "Issue with long body",
+                "html_url": "https://github.com/user/repo/issues/1",
+                "body": long_body,
+            }
+        ]
+
+        result = quest_manager.sync_github_issues(issues)
+
+        assert result["added"] == 1
+
+        quests = storage.get_quests()
+        assert len(quests[0]["description"]) == 200
+        assert quests[0]["description"].endswith("...")
+
+    def test_sync_handles_empty_body(self, quest_manager, storage):
+        """Syncing handles issues with no body."""
+        issues = [
+            {
+                "id": 1,
+                "title": "Issue without body",
+                "html_url": "https://github.com/user/repo/issues/1",
+                "body": None,
+            },
+            {
+                "id": 2,
+                "title": "Issue with empty body",
+                "html_url": "https://github.com/user/repo/issues/2",
+                "body": "",
+            },
+        ]
+
+        result = quest_manager.sync_github_issues(issues)
+
+        assert result["added"] == 2
+
+        quests = storage.get_quests()
+        assert quests[0]["description"] is None
+        assert quests[1]["description"] is None
+
+    def test_sync_handles_empty_issues_list(self, quest_manager, storage):
+        """Syncing handles empty issues list."""
+        result = quest_manager.sync_github_issues([])
+
+        assert result["added"] == 0
+        assert result["skipped"] == 0
+
+        quests = storage.get_quests()
+        assert len(quests) == 0
