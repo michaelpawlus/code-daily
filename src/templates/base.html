@@ -489,6 +489,48 @@
             }
         }
 
+        // GitHub Issues sync function
+        async function syncGitHubIssues() {
+            const btn = document.getElementById('sync-github-btn');
+            const textEl = document.getElementById('sync-github-text');
+            const originalText = textEl.textContent;
+
+            // Disable button and show loading state
+            btn.disabled = true;
+            textEl.textContent = 'Syncing...';
+
+            try {
+                const response = await fetch('/api/quests/sync-github-issues', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.added > 0) {
+                        textEl.textContent = `Added ${data.added}!`;
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } else {
+                        textEl.textContent = 'No new issues';
+                        setTimeout(() => {
+                            textEl.textContent = originalText;
+                            btn.disabled = false;
+                        }, 2000);
+                    }
+                } else {
+                    const data = await response.json();
+                    alert('Error syncing issues: ' + (data.detail || 'Unknown error'));
+                    textEl.textContent = originalText;
+                    btn.disabled = false;
+                }
+            } catch (error) {
+                alert('Error syncing issues: ' + error.message);
+                textEl.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
         // Ideas functions
         async function addIdea(event) {
             event.preventDefault();
@@ -529,6 +571,70 @@
                 hideSkipModal();
             }
         });
+
+        // TODO scanner functions
+        async function scanTodos() {
+            const btn = document.getElementById('scan-todos-btn');
+            const textEl = document.getElementById('scan-todos-text');
+            const originalText = textEl.textContent;
+
+            // Disable button and show loading state
+            btn.disabled = true;
+            textEl.textContent = 'Scanning...';
+
+            try {
+                const response = await fetch('/api/quests/scan-todos', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.added > 0) {
+                        textEl.textContent = `Added ${data.added}!`;
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } else {
+                        textEl.textContent = 'No new TODOs';
+                        setTimeout(() => {
+                            textEl.textContent = originalText;
+                            btn.disabled = false;
+                        }, 2000);
+                    }
+                } else {
+                    const data = await response.json();
+                    alert('Error scanning TODOs: ' + (data.detail || 'Unknown error'));
+                    textEl.textContent = originalText;
+                    btn.disabled = false;
+                }
+            } catch (error) {
+                alert('Error scanning TODOs: ' + error.message);
+                textEl.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // Copy source reference to clipboard
+        async function copySourceRef(sourceRef) {
+            try {
+                await navigator.clipboard.writeText(sourceRef);
+                // Show brief feedback - we could add a toast here
+                const btn = event.target.closest('button');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied!';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 1500);
+            } catch (error) {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = sourceRef;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+        }
     </script>
 </body>
 </html>

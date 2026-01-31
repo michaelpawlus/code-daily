@@ -20,6 +20,7 @@ from src.storage import CommitStorage, get_commit_events_with_history
 from src.achievements import check_achievements, get_all_achievements_status
 from src.quest_manager import QuestManager
 from src.ideas import read_ideas, add_idea, sync_ideas_to_db
+from src.todo_scanner import scan_directory
 
 app = FastAPI(
     title="code-daily",
@@ -448,4 +449,54 @@ def sync_ideas():
     storage = CommitStorage()
     result = sync_ideas_to_db(storage)
 
+    return result
+
+
+@app.post("/api/quests/sync-github-issues")
+def sync_github_issues():
+    """
+    Sync GitHub issues assigned to the user as quests.
+
+    Fetches open issues assigned to the authenticated user and creates
+    quests for any that don't already exist in the database.
+
+    Returns:
+        JSON with added and skipped counts
+    """
+    try:
+        validate_config()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {e}")
+
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    try:
+        issues = client.get_assigned_issues(state="open", per_page=50)
+    except GitHubClientError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    result = quest_manager.sync_github_issues(issues)
+    return result
+
+
+@app.post("/api/quests/scan-todos")
+def scan_todos():
+    """
+    Scan the project for TODO/FIXME comments and create quests.
+
+    Scans Python files in the project directory for TODO, FIXME, HACK, and XXX
+    comments and creates quests for any that don't already exist.
+
+    Returns:
+        JSON with added and skipped counts
+    """
+    project_root = Path(__file__).parent.parent
+    todos = scan_directory(project_root)
+
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    result = quest_manager.sync_todo_comments(todos)
     return result
