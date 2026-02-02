@@ -291,7 +291,7 @@
         {% if quests.active %}
         <div class="mb-4">
             <h3 class="text-sm font-medium mb-2" style="color: var(--accent-goal);">In Progress</h3>
-            <div class="space-y-2">
+            <div class="space-y-2 quest-list-scroll">
                 {% for quest in quests.active %}
                 <div class="flex items-center justify-between p-3 rounded-lg" style="background-color: var(--bg-secondary); border-left: 3px solid var(--accent-goal);">
                     <div class="flex-1">
@@ -313,7 +313,7 @@
 
         <!-- Pending Quests -->
         {% if quests.pending %}
-        <div class="space-y-2" data-quest-list>
+        <div class="space-y-2 quest-list-scroll" data-quest-list>
             {% for quest in quests.pending %}
             <div class="flex items-center justify-between p-3 rounded-lg quest-item" style="background-color: var(--bg-secondary);" data-quest-id="{{ quest.id }}">
                 <div class="flex-1">

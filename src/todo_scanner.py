@@ -14,7 +14,10 @@ from pathlib import Path
 TODO_PATTERN = re.compile(r"#\s*(TODO|FIXME|HACK|XXX):\s*(.+)", re.IGNORECASE)
 
 # Directories to exclude from scanning
-EXCLUDED_DIRS = {".venv", "__pycache__", ".git", "node_modules", ".tox", ".pytest_cache"}
+EXCLUDED_DIRS = {".venv", "__pycache__", ".git", "node_modules", ".tox", ".pytest_cache", "tests"}
+
+# Test file patterns to exclude (test-specific TODOs are usually not actionable production work)
+TEST_FILE_PATTERNS = {"conftest.py"}
 
 
 @dataclass
@@ -84,6 +87,11 @@ def scan_directory(root: Path) -> list[TodoComment]:
         # Check if any parent directory should be excluded
         rel_path = path.relative_to(root)
         if any(part in EXCLUDED_DIRS for part in rel_path.parts):
+            continue
+
+        # Check if file matches test patterns
+        filename = path.name
+        if filename.startswith("test_") or filename.endswith("_test.py") or filename in TEST_FILE_PATTERNS:
             continue
 
         # Scan the file and convert to relative paths

@@ -214,6 +214,30 @@
             height: 3px;
             background: linear-gradient(90deg, var(--accent-streak), var(--accent-streak-light));
         }
+
+        /* Quest list scrollbar styling */
+        .quest-list-scroll {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .quest-list-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .quest-list-scroll::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+            border-radius: 3px;
+        }
+
+        .quest-list-scroll::-webkit-scrollbar-thumb {
+            background: var(--border-card);
+            border-radius: 3px;
+        }
+
+        .quest-list-scroll::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
     </style>
 </head>
 <body class="min-h-screen">
