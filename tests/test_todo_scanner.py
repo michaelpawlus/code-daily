@@ -282,6 +282,68 @@ class TestScanDirectory:
         todos = scan_directory(temp_dir)
         assert todos == []
 
+    def test_scan_excludes_tests_directory(self, temp_dir):
+        """Excludes tests/ directory."""
+        tests_dir = temp_dir / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_app.py").write_text("# TODO: Should be ignored\n")
+        (temp_dir / "app.py").write_text("# TODO: Should be found\n")
+
+        todos = scan_directory(temp_dir)
+
+        assert len(todos) == 1
+        assert todos[0].file_path == "app.py"
+
+    def test_scan_excludes_test_prefix_files(self, temp_dir):
+        """Excludes test_*.py files in any directory."""
+        src_dir = temp_dir / "src"
+        src_dir.mkdir()
+        (src_dir / "test_utils.py").write_text("# TODO: Should be ignored\n")
+        (src_dir / "utils.py").write_text("# TODO: Should be found\n")
+
+        todos = scan_directory(temp_dir)
+
+        assert len(todos) == 1
+        assert todos[0].file_path == "src/utils.py"
+
+    def test_scan_excludes_test_suffix_files(self, temp_dir):
+        """Excludes *_test.py files in any directory."""
+        src_dir = temp_dir / "src"
+        src_dir.mkdir()
+        (src_dir / "utils_test.py").write_text("# TODO: Should be ignored\n")
+        (src_dir / "utils.py").write_text("# TODO: Should be found\n")
+
+        todos = scan_directory(temp_dir)
+
+        assert len(todos) == 1
+        assert todos[0].file_path == "src/utils.py"
+
+    def test_scan_excludes_conftest(self, temp_dir):
+        """Excludes conftest.py files."""
+        (temp_dir / "conftest.py").write_text("# TODO: Should be ignored\n")
+        (temp_dir / "app.py").write_text("# TODO: Should be found\n")
+
+        todos = scan_directory(temp_dir)
+
+        assert len(todos) == 1
+        assert todos[0].file_path == "app.py"
+
+    def test_scan_includes_non_test_files(self, temp_dir):
+        """Non-test Python files are still scanned."""
+        src_dir = temp_dir / "src"
+        src_dir.mkdir()
+        (src_dir / "app.py").write_text("# TODO: Main app\n")
+        (src_dir / "utils.py").write_text("# TODO: Utilities\n")
+        (src_dir / "models.py").write_text("# FIXME: Models\n")
+
+        todos = scan_directory(temp_dir)
+
+        assert len(todos) == 3
+        paths = [t.file_path for t in todos]
+        assert "src/app.py" in paths
+        assert "src/utils.py" in paths
+        assert "src/models.py" in paths
+
 
 class TestSyncTodoComments:
     """Tests for QuestManager.sync_todo_comments method."""
