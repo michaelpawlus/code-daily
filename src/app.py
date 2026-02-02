@@ -167,7 +167,7 @@ def index(request: Request):
     storage = CommitStorage()
     quest_manager = QuestManager(storage)
     data["quests"] = {
-        "pending": quest_manager.get_pending_quests(limit=5),
+        "pending": quest_manager.get_prioritized_quests(status="pending", limit=5),
         "active": quest_manager.get_active_quests(),
         "summary": quest_manager.get_quest_summary(),
     }
@@ -279,7 +279,7 @@ def get_quests():
     quest_manager = QuestManager(storage)
 
     return {
-        "pending": quest_manager.get_pending_quests(limit=5),
+        "pending": quest_manager.get_prioritized_quests(status="pending", limit=5),
         "active": quest_manager.get_active_quests(),
         "summary": quest_manager.get_quest_summary(),
     }

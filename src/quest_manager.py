@@ -5,6 +5,8 @@ Provides lifecycle management for coding quests: creation, acceptance,
 completion, and skipping with save-as-idea functionality.
 """
 
+from datetime import datetime
+
 from src.storage import CommitStorage
 
 
@@ -49,6 +51,102 @@ class QuestManager:
             List of all quest dictionaries
         """
         return self.storage.get_quests()
+
+    def calculate_priority_score(
+        self, quest: dict, previous_source: str | None = None
+    ) -> int:
+        """
+        Calculate priority score for a quest (higher = more priority).
+
+        Args:
+            quest: Quest dictionary with source, created_at, description
+            previous_source: Source of previously scored quest (for variety bonus)
+
+        Returns:
+            Integer priority score
+        """
+        score = 0
+
+        # Age factor: older quests get boosted (max +10 points)
+        created_at_str = quest.get("created_at")
+        if created_at_str:
+            try:
+                created_at = datetime.fromisoformat(created_at_str)
+                age_days = (datetime.now() - created_at).days
+                score += min(age_days, 10)
+            except (ValueError, TypeError):
+                pass  # Skip age bonus if date parsing fails
+
+        # Source priority: external commitments rank higher
+        source_scores = {
+            "github_issue": 3,
+            "todo_scan": 2,
+            "ideas_md": 1,
+            "manual": 0,
+        }
+        score += source_scores.get(quest.get("source", ""), 0)
+
+        # Description bonus: more context = more actionable
+        if quest.get("description"):
+            score += 2
+
+        # Variety bonus: mix sources rather than showing all from one type
+        if previous_source and quest.get("source") != previous_source:
+            score += 3
+
+        return score
+
+    def get_prioritized_quests(
+        self, status: str = "pending", limit: int = 5
+    ) -> list[dict]:
+        """
+        Get quests sorted by priority score.
+
+        Args:
+            status: Quest status to filter by
+            limit: Maximum number of quests to return
+
+        Returns:
+            List of quest dictionaries with priority_score added, sorted by score descending
+        """
+        quests = self.storage.get_quests(status=status)
+
+        if not quests:
+            return []
+
+        # First pass: calculate base scores
+        for quest in quests:
+            quest["priority_score"] = self.calculate_priority_score(quest)
+
+        # Sort by base score descending
+        quests.sort(key=lambda q: q["priority_score"], reverse=True)
+
+        # Second pass: apply variety bonus to reorder
+        # Take top candidates and interleave sources when possible
+        result = []
+        remaining = quests.copy()
+        prev_source = None
+
+        while remaining and len(result) < limit:
+            # Find best quest considering variety bonus
+            best_idx = 0
+            best_score = remaining[0]["priority_score"]
+
+            if prev_source:
+                for i, quest in enumerate(remaining[: min(5, len(remaining))]):
+                    adjusted_score = quest["priority_score"]
+                    if quest.get("source") != prev_source:
+                        adjusted_score += 3  # variety bonus
+                    if adjusted_score > best_score:
+                        best_score = adjusted_score
+                        best_idx = i
+
+            selected = remaining.pop(best_idx)
+            selected["priority_score"] = best_score  # Update with variety bonus
+            result.append(selected)
+            prev_source = selected.get("source")
+
+        return result
 
     def add_manual_quest(self, title: str, description: str | None = None) -> dict:
         """

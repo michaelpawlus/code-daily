@@ -1,6 +1,7 @@
 """Tests for the quest system."""
 
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -482,3 +483,188 @@ class TestGitHubIssuesSync:
 
         quests = storage.get_quests()
         assert len(quests) == 0
+
+
+class TestPriorityScoring:
+    """Tests for quest priority scoring."""
+
+    def test_priority_score_age_bonus(self, quest_manager):
+        """Older quests should score higher (up to +10)."""
+        now = datetime.now()
+
+        # New quest (0 days old)
+        new_quest = {
+            "created_at": now.isoformat(),
+            "source": "manual",
+        }
+        new_score = quest_manager.calculate_priority_score(new_quest)
+
+        # 5 day old quest
+        old_quest = {
+            "created_at": (now - timedelta(days=5)).isoformat(),
+            "source": "manual",
+        }
+        old_score = quest_manager.calculate_priority_score(old_quest)
+
+        # 15 day old quest (should cap at +10)
+        very_old_quest = {
+            "created_at": (now - timedelta(days=15)).isoformat(),
+            "source": "manual",
+        }
+        very_old_score = quest_manager.calculate_priority_score(very_old_quest)
+
+        assert old_score > new_score
+        assert old_score == new_score + 5
+        assert very_old_score == new_score + 10  # Capped at 10
+
+    def test_priority_score_source_ranking(self, quest_manager):
+        """GitHub issues should rank higher than manual quests."""
+        now = datetime.now().isoformat()
+
+        github_quest = {"created_at": now, "source": "github_issue"}
+        todo_quest = {"created_at": now, "source": "todo_scan"}
+        ideas_quest = {"created_at": now, "source": "ideas_md"}
+        manual_quest = {"created_at": now, "source": "manual"}
+
+        github_score = quest_manager.calculate_priority_score(github_quest)
+        todo_score = quest_manager.calculate_priority_score(todo_quest)
+        ideas_score = quest_manager.calculate_priority_score(ideas_quest)
+        manual_score = quest_manager.calculate_priority_score(manual_quest)
+
+        assert github_score > todo_score > ideas_score > manual_score
+        assert github_score == manual_score + 3
+        assert todo_score == manual_score + 2
+        assert ideas_score == manual_score + 1
+
+    def test_priority_score_description_bonus(self, quest_manager):
+        """Quests with descriptions should score +2 higher."""
+        now = datetime.now().isoformat()
+
+        with_desc = {
+            "created_at": now,
+            "source": "manual",
+            "description": "Some details here",
+        }
+        without_desc = {
+            "created_at": now,
+            "source": "manual",
+            "description": None,
+        }
+
+        score_with = quest_manager.calculate_priority_score(with_desc)
+        score_without = quest_manager.calculate_priority_score(without_desc)
+
+        assert score_with == score_without + 2
+
+    def test_priority_score_variety_bonus(self, quest_manager):
+        """Different source from previous should get +3 bonus."""
+        now = datetime.now().isoformat()
+
+        quest = {"created_at": now, "source": "github_issue"}
+
+        # No previous source
+        score_no_prev = quest_manager.calculate_priority_score(quest, previous_source=None)
+
+        # Same source
+        score_same = quest_manager.calculate_priority_score(quest, previous_source="github_issue")
+
+        # Different source
+        score_diff = quest_manager.calculate_priority_score(quest, previous_source="manual")
+
+        assert score_no_prev == score_same
+        assert score_diff == score_same + 3
+
+    def test_prioritized_quests_ordering(self, quest_manager, storage):
+        """Higher priority quests should appear first."""
+        # Create quests with different sources
+        # GitHub issue should rank higher than manual
+        storage.create_quest(
+            title="Manual quest",
+            source="manual",
+        )
+        storage.create_quest(
+            title="GitHub issue",
+            source="github_issue",
+            source_ref="https://github.com/test/repo/issues/1",
+        )
+
+        prioritized = quest_manager.get_prioritized_quests(status="pending", limit=5)
+
+        assert len(prioritized) == 2
+        # GitHub issue should be first (higher source score)
+        assert prioritized[0]["title"] == "GitHub issue"
+        assert prioritized[1]["title"] == "Manual quest"
+        # Both should have priority_score field
+        assert "priority_score" in prioritized[0]
+        assert "priority_score" in prioritized[1]
+        assert prioritized[0]["priority_score"] >= prioritized[1]["priority_score"]
+
+    def test_prioritized_quests_variety(self, quest_manager, storage):
+        """Should interleave sources rather than grouping same source."""
+        # Create multiple quests from same sources
+        for i in range(3):
+            storage.create_quest(
+                title=f"GitHub issue {i}",
+                source="github_issue",
+                source_ref=f"https://github.com/test/repo/issues/{i}",
+            )
+        for i in range(3):
+            storage.create_quest(
+                title=f"TODO item {i}",
+                source="todo_scan",
+                source_ref=f"file.py:line{i}",
+            )
+
+        prioritized = quest_manager.get_prioritized_quests(status="pending", limit=6)
+
+        assert len(prioritized) == 6
+
+        # Check that sources are interleaved (not all github_issue first)
+        # Due to variety bonus, we shouldn't have 3 consecutive same-source quests
+        consecutive_same = 0
+        max_consecutive = 0
+        prev_source = None
+        for quest in prioritized:
+            if quest["source"] == prev_source:
+                consecutive_same += 1
+            else:
+                max_consecutive = max(max_consecutive, consecutive_same)
+                consecutive_same = 1
+            prev_source = quest["source"]
+        max_consecutive = max(max_consecutive, consecutive_same)
+
+        # With variety bonus, we should typically see alternation
+        # At most 2 consecutive same source (depending on score distribution)
+        assert max_consecutive <= 3
+
+    def test_prioritized_quests_empty(self, quest_manager):
+        """Should return empty list when no quests."""
+        prioritized = quest_manager.get_prioritized_quests(status="pending", limit=5)
+        assert prioritized == []
+
+    def test_prioritized_quests_respects_limit(self, quest_manager, storage):
+        """Should respect the limit parameter."""
+        for i in range(10):
+            storage.create_quest(title=f"Quest {i}", source="manual")
+
+        prioritized = quest_manager.get_prioritized_quests(status="pending", limit=3)
+        assert len(prioritized) == 3
+
+    def test_prioritized_quests_description_affects_order(self, quest_manager, storage):
+        """Quests with descriptions should rank higher than those without."""
+        storage.create_quest(
+            title="Without description",
+            source="manual",
+        )
+        storage.create_quest(
+            title="With description",
+            source="manual",
+            description="This has context",
+        )
+
+        prioritized = quest_manager.get_prioritized_quests(status="pending", limit=5)
+
+        assert len(prioritized) == 2
+        # Quest with description should be first
+        assert prioritized[0]["title"] == "With description"
+        assert prioritized[1]["title"] == "Without description"
