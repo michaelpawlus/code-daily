@@ -500,3 +500,63 @@ def scan_todos():
 
     result = quest_manager.sync_todo_comments(todos)
     return result
+
+
+@app.post("/api/quests/discover-external")
+def discover_external_issues():
+    """
+    Discover external contribution opportunities from starred repos.
+
+    Fetches repos starred by the user, searches for issues labeled
+    'good first issue' or 'help wanted', and creates quests from them.
+    Results are cached for 24 hours to avoid API rate limiting.
+
+    Returns:
+        JSON with added and skipped counts, plus cache status
+    """
+    import json
+
+    try:
+        validate_config()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"Configuration error: {e}")
+
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    cache_key = "external_issues"
+    cached_data = storage.get_cache(cache_key)
+
+    if cached_data:
+        # Use cached issues
+        issues = json.loads(cached_data)
+        result = quest_manager.sync_external_issues(issues)
+        result["from_cache"] = True
+        return result
+
+    # Fetch fresh data from GitHub
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+
+    try:
+        # Get starred repos
+        starred_repos = client.get_starred_repos(per_page=30)
+        repo_names = [repo.get("full_name") for repo in starred_repos if repo.get("full_name")]
+
+        if not repo_names:
+            return {"added": 0, "skipped": 0, "from_cache": False, "message": "No starred repos found"}
+
+        # Search for good first issues in starred repos
+        issues = client.search_good_first_issues(repo_names, per_page=20)
+
+        # Cache the results for 24 hours
+        storage.set_cache(cache_key, json.dumps(issues), hours=24)
+
+        # Sync to quests
+        result = quest_manager.sync_external_issues(issues)
+        result["from_cache"] = False
+        result["repos_searched"] = len(repo_names)
+        result["issues_found"] = len(issues)
+        return result
+
+    except GitHubClientError as e:
+        raise HTTPException(status_code=502, detail=str(e))

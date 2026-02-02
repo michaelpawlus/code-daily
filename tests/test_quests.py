@@ -668,3 +668,185 @@ class TestPriorityScoring:
         # Quest with description should be first
         assert prioritized[0]["title"] == "With description"
         assert prioritized[1]["title"] == "Without description"
+
+    def test_external_source_has_highest_priority(self, quest_manager):
+        """External quests should rank higher than all other sources."""
+        now = datetime.now().isoformat()
+
+        external_quest = {"created_at": now, "source": "external"}
+        github_quest = {"created_at": now, "source": "github_issue"}
+
+        external_score = quest_manager.calculate_priority_score(external_quest)
+        github_score = quest_manager.calculate_priority_score(github_quest)
+
+        assert external_score > github_score
+        assert external_score == github_score + 1  # external +4, github_issue +3
+
+
+class TestExternalIssuesSync:
+    """Tests for external issues sync functionality."""
+
+    def test_sync_creates_quest_from_external_issue(self, quest_manager, storage):
+        """Syncing external issues creates quests correctly."""
+        issues = [
+            {
+                "id": 1,
+                "title": "Good first issue",
+                "html_url": "https://github.com/owner/project/issues/42",
+                "body": "This is a beginner-friendly issue",
+            }
+        ]
+
+        result = quest_manager.sync_external_issues(issues)
+
+        assert result["added"] == 1
+        assert result["skipped"] == 0
+
+        quests = storage.get_quests()
+        assert len(quests) == 1
+        assert quests[0]["title"] == "[owner/project] Good first issue"
+        assert quests[0]["source"] == "external"
+        assert quests[0]["source_ref"] == "https://github.com/owner/project/issues/42"
+        assert quests[0]["description"] == "This is a beginner-friendly issue"
+
+    def test_sync_external_skips_existing(self, quest_manager, storage):
+        """Syncing doesn't duplicate existing external issues."""
+        # Create an existing quest for this issue
+        storage.create_quest(
+            title="[owner/repo] Existing external",
+            source="external",
+            source_ref="https://github.com/owner/repo/issues/1",
+        )
+
+        issues = [
+            {
+                "id": 1,
+                "title": "Existing external",
+                "html_url": "https://github.com/owner/repo/issues/1",
+                "body": "Already synced",
+            },
+            {
+                "id": 2,
+                "title": "New external issue",
+                "html_url": "https://github.com/owner/repo/issues/2",
+                "body": "Not synced yet",
+            },
+        ]
+
+        result = quest_manager.sync_external_issues(issues)
+
+        assert result["added"] == 1
+        assert result["skipped"] == 1
+
+        quests = storage.get_quests()
+        assert len(quests) == 2
+
+    def test_sync_external_handles_empty_list(self, quest_manager):
+        """Syncing handles empty issues list."""
+        result = quest_manager.sync_external_issues([])
+
+        assert result["added"] == 0
+        assert result["skipped"] == 0
+
+    def test_sync_external_truncates_description(self, quest_manager, storage):
+        """Syncing truncates long descriptions."""
+        long_body = "x" * 300
+
+        issues = [
+            {
+                "id": 1,
+                "title": "Long description issue",
+                "html_url": "https://github.com/owner/repo/issues/1",
+                "body": long_body,
+            }
+        ]
+
+        result = quest_manager.sync_external_issues(issues)
+
+        assert result["added"] == 1
+
+        quests = storage.get_quests()
+        assert len(quests[0]["description"]) == 200
+        assert quests[0]["description"].endswith("...")
+
+    def test_sync_external_handles_empty_body(self, quest_manager, storage):
+        """Syncing handles issues with no body."""
+        issues = [
+            {
+                "id": 1,
+                "title": "No body issue",
+                "html_url": "https://github.com/owner/repo/issues/1",
+                "body": None,
+            }
+        ]
+
+        result = quest_manager.sync_external_issues(issues)
+
+        assert result["added"] == 1
+
+        quests = storage.get_quests()
+        assert quests[0]["description"] is None
+
+
+class TestExternalCache:
+    """Tests for external cache functionality."""
+
+    def test_set_and_get_cache(self, storage):
+        """Can store and retrieve cached data."""
+        storage.set_cache("test_key", '{"data": "test"}', hours=1)
+
+        cached = storage.get_cache("test_key")
+        assert cached == '{"data": "test"}'
+
+    def test_get_cache_returns_none_for_missing_key(self, storage):
+        """Returns None for non-existent cache key."""
+        cached = storage.get_cache("nonexistent")
+        assert cached is None
+
+    def test_cache_expiration(self, storage):
+        """Expired cache entries are not returned."""
+        # Set cache with 0 hours (immediately expired)
+        with __import__("sqlite3").connect(storage.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO external_cache (cache_key, data, expires_at)
+                VALUES (?, ?, datetime('now', '-1 hour'))
+                """,
+                ("expired_key", '{"old": "data"}'),
+            )
+            conn.commit()
+
+        cached = storage.get_cache("expired_key")
+        assert cached is None
+
+    def test_set_cache_updates_existing(self, storage):
+        """Setting cache for existing key updates the value."""
+        storage.set_cache("update_key", '{"version": 1}', hours=1)
+        storage.set_cache("update_key", '{"version": 2}', hours=1)
+
+        cached = storage.get_cache("update_key")
+        assert cached == '{"version": 2}'
+
+    def test_clear_expired_cache(self, storage):
+        """Clearing expired cache removes old entries."""
+        # Add expired entry
+        with __import__("sqlite3").connect(storage.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO external_cache (cache_key, data, expires_at)
+                VALUES (?, ?, datetime('now', '-1 hour'))
+                """,
+                ("expired", '{"old": "data"}'),
+            )
+            conn.commit()
+
+        # Add valid entry
+        storage.set_cache("valid", '{"new": "data"}', hours=1)
+
+        # Clear expired
+        removed = storage.clear_expired_cache()
+        assert removed == 1
+
+        # Expired should be gone, valid should remain
+        assert storage.get_cache("expired") is None
+        assert storage.get_cache("valid") == '{"new": "data"}'

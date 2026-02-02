@@ -638,6 +638,55 @@
             }
         }
 
+        // Discover external contribution opportunities
+        async function discoverExternal() {
+            const btn = document.getElementById('discover-external-btn');
+            const textEl = document.getElementById('discover-external-text');
+            const originalText = textEl.textContent;
+
+            // Disable button and show loading state
+            btn.disabled = true;
+            textEl.textContent = 'Searching...';
+
+            try {
+                const response = await fetch('/api/quests/discover-external', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.added > 0) {
+                        textEl.textContent = `Found ${data.added}!`;
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } else if (data.message) {
+                        textEl.textContent = 'No starred repos';
+                        setTimeout(() => {
+                            textEl.textContent = originalText;
+                            btn.disabled = false;
+                        }, 2000);
+                    } else {
+                        const cacheNote = data.from_cache ? ' (cached)' : '';
+                        textEl.textContent = `No new issues${cacheNote}`;
+                        setTimeout(() => {
+                            textEl.textContent = originalText;
+                            btn.disabled = false;
+                        }, 2000);
+                    }
+                } else {
+                    const data = await response.json();
+                    alert('Error discovering issues: ' + (data.detail || 'Unknown error'));
+                    textEl.textContent = originalText;
+                    btn.disabled = false;
+                }
+            } catch (error) {
+                alert('Error discovering issues: ' + error.message);
+                textEl.textContent = originalText;
+                btn.disabled = false;
+            }
+        }
+
         // Copy source reference to clipboard
         async function copySourceRef(sourceRef) {
             try {

@@ -97,6 +97,18 @@ class CommitStorage:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS external_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cache_key TEXT UNIQUE NOT NULL,
+                    data TEXT NOT NULL,
+                    fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_external_cache_key ON external_cache(cache_key)
+            """)
             conn.commit()
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -550,6 +562,65 @@ class CommitStorage:
             cursor = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    # External cache methods
+    def get_cache(self, cache_key: str) -> str | None:
+        """
+        Get cached data if not expired.
+
+        Args:
+            cache_key: The cache key to look up
+
+        Returns:
+            Cached JSON data as string, or None if not found/expired
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT data FROM external_cache
+                WHERE cache_key = ? AND expires_at > datetime('now')
+                """,
+                (cache_key,),
+            ).fetchone()
+        return row["data"] if row else None
+
+    def set_cache(self, cache_key: str, data: str, hours: int = 24) -> None:
+        """
+        Store data in cache with expiration.
+
+        Args:
+            cache_key: The cache key
+            data: JSON string data to cache
+            hours: Hours until expiration (default 24)
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO external_cache (cache_key, data, expires_at)
+                VALUES (?, ?, datetime('now', '+' || ? || ' hours'))
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    data = excluded.data,
+                    fetched_at = CURRENT_TIMESTAMP,
+                    expires_at = excluded.expires_at
+                """,
+                (cache_key, data, hours),
+            )
+            conn.commit()
+
+    def clear_expired_cache(self) -> int:
+        """
+        Remove expired cache entries.
+
+        Returns:
+            Number of entries removed
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM external_cache WHERE expires_at <= datetime('now')"
+            )
+            conn.commit()
+            return cursor.rowcount
 
 
 def get_commit_events_with_history(
