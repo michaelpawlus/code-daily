@@ -232,3 +232,201 @@ class TestGitHubClientAssignedIssues:
 
         call_args = mock_get.call_args
         assert call_args[1]["params"]["per_page"] == 100
+
+
+class TestGitHubClientStarredRepos:
+    """Tests for fetching starred repos."""
+
+    @patch("requests.Session.get")
+    def test_get_starred_repos_success(self, mock_get):
+        """Should return starred repos on successful API call."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"id": 1, "full_name": "owner/repo", "name": "repo"},
+            {"id": 2, "full_name": "org/project", "name": "project"},
+        ]
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        repos = client.get_starred_repos()
+
+        assert len(repos) == 2
+        assert repos[0]["full_name"] == "owner/repo"
+        mock_get.assert_called_once()
+
+        # Verify correct endpoint
+        call_args = mock_get.call_args
+        assert "/user/starred" in call_args[0][0]
+        assert call_args[1]["params"]["sort"] == "updated"
+
+    @patch("requests.Session.get")
+    def test_get_starred_repos_auth_failure(self, mock_get):
+        """Should raise error on 401 unauthorized."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 401
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("bad_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="Authentication failed"):
+            client.get_starred_repos()
+
+    @patch("requests.Session.get")
+    def test_get_starred_repos_rate_limit(self, mock_get):
+        """Should raise error on 403 rate limit."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 403
+        mock_response.headers = {"X-RateLimit-Remaining": "0"}
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="rate limit"):
+            client.get_starred_repos()
+
+    @patch("requests.Session.get")
+    def test_get_starred_repos_caps_per_page_at_100(self, mock_get):
+        """Should cap per_page at 100 (GitHub's max)."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        client.get_starred_repos(per_page=200)
+
+        call_args = mock_get.call_args
+        assert call_args[1]["params"]["per_page"] == 100
+
+
+class TestGitHubClientSearchGoodFirstIssues:
+    """Tests for searching good first issues."""
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_success(self, mock_get):
+        """Should return issues on successful search."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "total_count": 2,
+            "items": [
+                {
+                    "id": 1,
+                    "title": "Good first issue",
+                    "html_url": "https://github.com/owner/repo/issues/1",
+                    "body": "Description here",
+                },
+                {
+                    "id": 2,
+                    "title": "Help wanted",
+                    "html_url": "https://github.com/org/project/issues/5",
+                    "body": "Another description",
+                },
+            ],
+        }
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        issues = client.search_good_first_issues(["owner/repo", "org/project"])
+
+        assert len(issues) == 2
+        assert issues[0]["title"] == "Good first issue"
+        mock_get.assert_called_once()
+
+        # Verify search API was used
+        call_args = mock_get.call_args
+        assert "/search/issues" in call_args[0][0]
+        assert "repo:owner/repo" in call_args[1]["params"]["q"]
+        assert "repo:org/project" in call_args[1]["params"]["q"]
+        assert 'label:"good first issue"' in call_args[1]["params"]["q"]
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_empty_repos(self, mock_get):
+        """Should return empty list when no repos provided."""
+        client = GitHubClient("test_token", "test_user")
+        issues = client.search_good_first_issues([])
+
+        assert issues == []
+        mock_get.assert_not_called()
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_custom_labels(self, mock_get):
+        """Should use custom labels when provided."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"items": []}
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        client.search_good_first_issues(["owner/repo"], labels=["beginner-friendly"])
+
+        call_args = mock_get.call_args
+        assert 'label:"beginner-friendly"' in call_args[1]["params"]["q"]
+        assert 'label:"good first issue"' not in call_args[1]["params"]["q"]
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_auth_failure(self, mock_get):
+        """Should raise error on 401 unauthorized."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 401
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("bad_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="Authentication failed"):
+            client.search_good_first_issues(["owner/repo"])
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_rate_limit(self, mock_get):
+        """Should raise error on 403 rate limit."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 403
+        mock_response.headers = {"X-RateLimit-Remaining": "0"}
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="rate limit"):
+            client.search_good_first_issues(["owner/repo"])
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_invalid_query(self, mock_get):
+        """Should raise error on 422 invalid query."""
+        mock_response = MagicMock()
+        mock_response.ok = False
+        mock_response.status_code = 422
+        mock_response.text = "Invalid query"
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+
+        with pytest.raises(GitHubClientError, match="Invalid search query"):
+            client.search_good_first_issues(["owner/repo"])
+
+    @patch("requests.Session.get")
+    def test_search_good_first_issues_limits_repos(self, mock_get):
+        """Should limit to 10 repos to avoid overly long queries."""
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"items": []}
+        mock_get.return_value = mock_response
+
+        client = GitHubClient("test_token", "test_user")
+        repos = [f"owner/repo{i}" for i in range(20)]
+        client.search_good_first_issues(repos)
+
+        call_args = mock_get.call_args
+        query = call_args[1]["params"]["q"]
+        # Should only have 10 repos in query
+        repo_count = query.count("repo:")
+        assert repo_count == 10

@@ -79,6 +79,7 @@ class QuestManager:
 
         # Source priority: external commitments rank higher
         source_scores = {
+            "external": 4,  # External contribution opportunities rank highest
             "github_issue": 3,
             "todo_scan": 2,
             "ideas_md": 1,
@@ -305,6 +306,59 @@ class QuestManager:
             self.storage.create_quest(
                 title=title,
                 source="github_issue",
+                source_ref=issue_url,
+                description=description if description else None,
+            )
+            added += 1
+
+        return {"added": added, "skipped": skipped}
+
+    def sync_external_issues(self, issues: list[dict]) -> dict:
+        """
+        Sync external issues (from starred repos) to quests, skipping duplicates.
+
+        Creates new quests from external issues that haven't been synced before.
+        These are marked with source='external' to distinguish from user's own issues.
+
+        Args:
+            issues: List of issue dictionaries from GitHub search API
+
+        Returns:
+            Dictionary with 'added' and 'skipped' counts
+        """
+        added = 0
+        skipped = 0
+
+        for issue in issues:
+            issue_url = issue.get("html_url", "")
+            if not issue_url:
+                continue
+
+            # Check if we already have a quest for this issue
+            if self.storage.quest_exists_by_source_ref("external", issue_url):
+                skipped += 1
+                continue
+
+            # Extract repo name from URL: https://github.com/owner/repo/issues/123
+            repo_name = ""
+            if "github.com/" in issue_url:
+                parts = issue_url.split("github.com/")[1].split("/")
+                if len(parts) >= 2:
+                    repo_name = f"{parts[0]}/{parts[1]}"
+
+            # Build title with repo prefix
+            title = issue.get("title", "Untitled issue")
+            if repo_name:
+                title = f"[{repo_name}] {title}"
+
+            # Truncate description to 200 chars
+            description = issue.get("body") or ""
+            if len(description) > 200:
+                description = description[:197] + "..."
+
+            self.storage.create_quest(
+                title=title,
+                source="external",
                 source_ref=issue_url,
                 description=description if description else None,
             )

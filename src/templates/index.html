@@ -256,6 +256,14 @@
                     </svg>
                     <span id="scan-todos-text">Scan TODOs</span>
                 </button>
+                <button onclick="discoverExternal()" class="text-sm px-3 py-1 rounded transition-opacity hover:opacity-90 flex items-center gap-1"
+                        style="background-color: var(--accent-achievement); color: white;"
+                        id="discover-external-btn" title="Find good first issues in your starred repos">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                    </svg>
+                    <span id="discover-external-text">Discover</span>
+                </button>
                 <button onclick="toggleQuestForm()" class="text-sm px-3 py-1 rounded transition-opacity hover:opacity-90"
                         style="background-color: var(--accent-streak); color: white;" data-quest-add-btn>
                     + Add Quest
@@ -339,6 +347,16 @@
                             </svg>
                             {{ quest.source_ref }}
                         </button>
+                        {% elif quest.source == 'external' %}
+                        <a href="{{ quest.source_ref }}" target="_blank" rel="noopener noreferrer"
+                           class="text-xs px-2 py-0.5 rounded flex items-center gap-1 transition-opacity hover:opacity-80"
+                           style="background-color: var(--accent-achievement); color: white;"
+                           title="External contribution opportunity - View on GitHub">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                            </svg>
+                            Contribute
+                        </a>
                         {% else %}
                         <span class="text-xs px-2 py-0.5 rounded" style="background-color: var(--bg-card); color: var(--text-muted);">
                             {{ quest.source }}
