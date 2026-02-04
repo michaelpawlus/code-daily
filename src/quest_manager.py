@@ -8,6 +8,7 @@ completion, and skipping with save-as-idea functionality.
 from datetime import datetime
 
 from src.storage import CommitStorage
+from src.llm_client import ClaudeClient, LLMConfigError, LLMRateLimitError, LLMError
 
 
 class QuestManager:
@@ -90,6 +91,15 @@ class QuestManager:
         # Description bonus: more context = more actionable
         if quest.get("description"):
             score += 2
+
+        # AI enhancement bonus: enhanced quests are more actionable
+        if quest.get("ai_description"):
+            score += 1
+
+        # Difficulty bonus: medium difficulty (2-3) is ideal for daily work
+        difficulty = quest.get("difficulty")
+        if difficulty in (2, 3):
+            score += 1
 
         # Variety bonus: mix sources rather than showing all from one type
         if previous_source and quest.get("source") != previous_source:
@@ -429,3 +439,122 @@ class QuestManager:
             added += 1
 
         return {"added": added, "skipped": skipped}
+
+    def enhance_quest(self, quest_id: int) -> dict:
+        """
+        Enhance a quest with AI-generated description and difficulty.
+
+        Args:
+            quest_id: The quest ID to enhance
+
+        Returns:
+            Dictionary with success status and enhanced quest or error message
+        """
+        quest = self.storage.get_quest(quest_id)
+        if not quest:
+            return {"success": False, "error": "Quest not found"}
+
+        llm_client = ClaudeClient(storage=self.storage)
+
+        if not llm_client.is_configured:
+            return {
+                "success": False,
+                "error": "AI features not configured. Set ANTHROPIC_API_KEY in .env",
+            }
+
+        try:
+            # Use title and description as context
+            content = quest["title"]
+            if quest.get("description"):
+                content += f"\n\n{quest['description']}"
+
+            # Extract file path from source_ref if available
+            file_path = quest.get("source_ref") or "unknown"
+
+            result = llm_client.enhance_todo(content, file_path)
+
+            # Update quest with AI fields
+            self.storage.update_quest_ai_fields(
+                quest_id=quest_id,
+                ai_description=result.description,
+                difficulty=result.difficulty,
+                difficulty_reasoning=result.difficulty_reasoning,
+            )
+
+            return {
+                "success": True,
+                "quest": self.storage.get_quest(quest_id),
+            }
+
+        except LLMRateLimitError as e:
+            return {"success": False, "error": str(e)}
+        except LLMError as e:
+            return {"success": False, "error": str(e)}
+
+    def enhance_pending_quests(self, limit: int = 5) -> dict:
+        """
+        Batch enhance pending quests that haven't been enhanced yet.
+
+        Args:
+            limit: Maximum number of quests to enhance (max 20)
+
+        Returns:
+            Dictionary with enhanced count, errors, and results
+        """
+        # Enforce max limit
+        limit = min(limit, 20)
+
+        llm_client = ClaudeClient(storage=self.storage)
+
+        if not llm_client.is_configured:
+            return {
+                "success": False,
+                "error": "AI features not configured. Set ANTHROPIC_API_KEY in .env",
+                "enhanced": 0,
+                "errors": [],
+            }
+
+        quests = self.storage.get_quests_without_ai(limit=limit)
+
+        enhanced = 0
+        errors = []
+        results = []
+
+        for quest in quests:
+            result = self.enhance_quest(quest["id"])
+            if result.get("success"):
+                enhanced += 1
+                results.append(result["quest"])
+            else:
+                errors.append({
+                    "quest_id": quest["id"],
+                    "error": result.get("error", "Unknown error"),
+                })
+                # Stop on rate limit to avoid hitting it repeatedly
+                if "rate limit" in result.get("error", "").lower():
+                    break
+
+        return {
+            "success": True,
+            "enhanced": enhanced,
+            "total_requested": len(quests),
+            "errors": errors,
+            "quests": results,
+        }
+
+    def get_ai_status(self) -> dict:
+        """
+        Get the status of AI features.
+
+        Returns:
+            Dictionary with enabled status and configuration info
+        """
+        llm_client = ClaudeClient(storage=self.storage)
+        return {
+            "enabled": llm_client.is_configured,
+            "message": (
+                "AI features enabled"
+                if llm_client.is_configured
+                else "Set ANTHROPIC_API_KEY in .env to enable AI features"
+            ),
+        }

@@ -79,9 +79,30 @@ class CommitStorage:
                     description TEXT,
                     status TEXT DEFAULT 'pending',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    ai_description TEXT,
+                    difficulty INTEGER,
+                    difficulty_reasoning TEXT,
+                    enhanced_at TEXT
                 )
             """)
+            # Add columns if they don't exist (for existing databases)
+            try:
+                conn.execute("ALTER TABLE quests ADD COLUMN ai_description TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE quests ADD COLUMN difficulty INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE quests ADD COLUMN difficulty_reasoning TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE quests ADD COLUMN enhanced_at TEXT")
+            except sqlite3.OperationalError:
+                pass
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status)
             """)
@@ -464,6 +485,64 @@ class CommitStorage:
             cursor = conn.execute("DELETE FROM quests WHERE id = ?", (quest_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def update_quest_ai_fields(
+        self,
+        quest_id: int,
+        ai_description: str | None = None,
+        difficulty: int | None = None,
+        difficulty_reasoning: str | None = None,
+    ) -> bool:
+        """
+        Update a quest's AI-generated fields.
+
+        Args:
+            quest_id: The quest ID
+            ai_description: AI-generated description
+            difficulty: Difficulty rating (1-5)
+            difficulty_reasoning: Explanation for difficulty rating
+
+        Returns:
+            True if quest was updated, False if not found
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE quests
+                SET ai_description = ?,
+                    difficulty = ?,
+                    difficulty_reasoning = ?,
+                    enhanced_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (ai_description, difficulty, difficulty_reasoning, quest_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_quests_without_ai(self, limit: int = 5) -> list[dict]:
+        """
+        Get pending quests that haven't been enhanced by AI.
+
+        Args:
+            limit: Maximum number of quests to return
+
+        Returns:
+            List of quest dictionaries without AI enhancement
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT * FROM quests
+                WHERE status = 'pending' AND enhanced_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     # Ideas methods
     def get_ideas(self, status: str | None = None) -> list[dict]:
