@@ -60,6 +60,12 @@ class IdeaCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000, description="Idea content")
 
 
+class BatchEnhanceRequest(BaseModel):
+    """Request model for batch quest enhancement."""
+
+    limit: int = Field(5, ge=1, le=20, description="Number of quests to enhance (1-20)")
+
+
 @app.get("/health")
 def health_check():
     """Health check endpoint."""
@@ -560,3 +566,71 @@ def discover_external_issues():
 
     except GitHubClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# AI Enhancement API endpoints
+@app.get("/api/ai/status")
+def get_ai_status():
+    """
+    Check if AI features are configured and available.
+
+    Returns:
+        JSON with enabled status and message
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    return quest_manager.get_ai_status()
+
+
+@app.post("/api/quests/{quest_id}/enhance")
+def enhance_quest(quest_id: int):
+    """
+    Enhance a single quest with AI-generated description and difficulty.
+
+    Args:
+        quest_id: The quest ID to enhance
+
+    Returns:
+        JSON with enhanced quest data or error message
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    result = quest_manager.enhance_quest(quest_id)
+
+    if not result.get("success"):
+        error = result.get("error", "Enhancement failed")
+        if "not found" in error.lower():
+            raise HTTPException(status_code=404, detail=error)
+        if "not configured" in error.lower():
+            raise HTTPException(status_code=503, detail=error)
+        if "rate limit" in error.lower():
+            raise HTTPException(status_code=429, detail=error)
+        raise HTTPException(status_code=500, detail=error)
+
+    return result
+
+
+@app.post("/api/quests/enhance-batch")
+def enhance_batch(request: BatchEnhanceRequest | None = None):
+    """
+    Batch enhance pending quests without AI descriptions.
+
+    Args:
+        request: Optional BatchEnhanceRequest with limit (default 5, max 20)
+
+    Returns:
+        JSON with enhancement results and any errors
+    """
+    storage = CommitStorage()
+    quest_manager = QuestManager(storage)
+
+    limit = request.limit if request else 5
+
+    result = quest_manager.enhance_pending_quests(limit=limit)
+
+    if not result.get("success") and "not configured" in result.get("error", "").lower():
+        raise HTTPException(status_code=503, detail=result.get("error"))
+
+    return result

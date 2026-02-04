@@ -1,7 +1,7 @@
 """
 Configuration management for code-daily.
 
-Loads GitHub credentials from environment variables.
+Loads GitHub and Anthropic credentials from environment variables.
 """
 
 import os
@@ -12,6 +12,7 @@ load_dotenv()
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 
 def validate_config():
