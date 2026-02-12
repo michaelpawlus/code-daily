@@ -130,6 +130,21 @@ class CommitStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_external_cache_key ON external_cache(cache_key)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notification_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    level INTEGER NOT NULL,
+                    channel TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    streak_value INTEGER,
+                    streak_active INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notification_log_date ON notification_log(date)
+            """)
             conn.commit()
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -641,6 +656,96 @@ class CommitStorage:
             cursor = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    # Notification log methods
+    def log_notification(
+        self,
+        date: str,
+        level: int,
+        channel: str,
+        message: str,
+        streak_value: int,
+        streak_active: bool,
+    ) -> int:
+        """
+        Log a sent notification.
+
+        Args:
+            date: Date in YYYY-MM-DD format
+            level: Urgency level (1-4)
+            channel: Channel name (e.g. 'ntfy')
+            message: The message that was sent
+            streak_value: Current streak count
+            streak_active: Whether streak was active when sent
+
+        Returns:
+            ID of the log entry
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO notification_log (date, level, channel, message, streak_value, streak_active)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (date, level, channel, message, streak_value, int(streak_active)),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_notifications_for_date(self, date: str) -> list[dict]:
+        """
+        Get all notifications sent on a given date.
+
+        Args:
+            date: Date in YYYY-MM-DD format
+
+        Returns:
+            List of notification log dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM notification_log WHERE date = ? ORDER BY sent_at",
+                (date,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_max_level_sent_today(self, date: str) -> int | None:
+        """
+        Get the highest notification level sent on a given date.
+
+        Used for deduplication -- don't re-send same or lower level.
+
+        Args:
+            date: Date in YYYY-MM-DD format
+
+        Returns:
+            Highest level sent, or None if no notifications sent today
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT MAX(level) FROM notification_log WHERE date = ?",
+                (date,),
+            ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def get_notification_history(self, limit: int = 30) -> list[dict]:
+        """
+        Get recent notification history.
+
+        Args:
+            limit: Maximum number of entries to return
+
+        Returns:
+            List of notification log dictionaries, most recent first
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM notification_log ORDER BY sent_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     # External cache methods
     def get_cache(self, cache_key: str) -> str | None:

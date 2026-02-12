@@ -14,6 +14,10 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+# Notification settings (optional)
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
+NTFY_SERVER = os.getenv("NTFY_SERVER", "https://ntfy.sh")
+
 
 def validate_config():
     """Validate that required configuration is present."""

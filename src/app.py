@@ -66,6 +66,12 @@ class BatchEnhanceRequest(BaseModel):
     limit: int = Field(5, ge=1, le=20, description="Number of quests to enhance (1-20)")
 
 
+class NotificationCheckRequest(BaseModel):
+    """Request model for triggering a notification check."""
+
+    level: int = Field(..., ge=1, le=4, description="Urgency level (1-4)")
+
+
 @app.get("/health")
 def health_check():
     """Health check endpoint."""
@@ -634,3 +640,65 @@ def enhance_batch(request: BatchEnhanceRequest | None = None):
         raise HTTPException(status_code=503, detail=result.get("error"))
 
     return result
+
+
+# Notification API endpoints
+@app.get("/api/notifications/status")
+def get_notification_status():
+    """
+    Get notification channel configuration status.
+
+    Returns:
+        JSON with channel statuses and whether any are configured
+    """
+    from src.notifications import NotificationManager
+
+    storage = CommitStorage()
+    manager = NotificationManager(storage)
+    return manager.get_status()
+
+
+@app.post("/api/notifications/test")
+def send_notification_test():
+    """
+    Send a test notification to verify channel setup.
+
+    Returns:
+        JSON with test results per channel
+    """
+    from src.notifications import NotificationManager
+
+    storage = CommitStorage()
+    manager = NotificationManager(storage)
+    return manager.send_test()
+
+
+@app.get("/api/notifications/history")
+def get_notification_history():
+    """
+    Get recent notification history.
+
+    Returns:
+        JSON with recent notification log entries
+    """
+    storage = CommitStorage()
+    history = storage.get_notification_history(limit=30)
+    return {"history": history}
+
+
+@app.post("/api/notifications/check")
+def trigger_notification_check(request: NotificationCheckRequest):
+    """
+    Manually trigger a notification check at the specified level.
+
+    Args:
+        request: NotificationCheckRequest with level (1-4)
+
+    Returns:
+        JSON with action taken and details
+    """
+    from src.notifications import NotificationManager
+
+    storage = CommitStorage()
+    manager = NotificationManager(storage)
+    return manager.check_and_notify(level=request.level)
