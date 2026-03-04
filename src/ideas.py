@@ -4,11 +4,17 @@ IDEAS.md integration for code-daily.
 Provides utilities to read/write the IDEAS.md file and sync with the database.
 """
 
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 
 from src.storage import CommitStorage
+
+
+def _is_serverless() -> bool:
+    """Check if running in serverless mode (Turso/Vercel)."""
+    return bool(os.environ.get("TURSO_DATABASE_URL"))
 
 
 def _get_default_ideas_path() -> Path:
@@ -63,6 +69,9 @@ def add_idea(content: str, ideas_path: Path | None = None) -> None:
         content: Idea content to add
         ideas_path: Path to IDEAS.md. Uses default if not provided.
     """
+    if _is_serverless():
+        return
+
     if ideas_path is None:
         ideas_path = _get_default_ideas_path()
 
@@ -92,6 +101,9 @@ def mark_idea_completed(content: str, ideas_path: Path | None = None) -> bool:
     Returns:
         True if idea was found and marked, False otherwise
     """
+    if _is_serverless():
+        return False
+
     if ideas_path is None:
         ideas_path = _get_default_ideas_path()
 
@@ -187,6 +199,9 @@ def sync_db_to_ideas(
     Returns:
         Dictionary with sync statistics
     """
+    if _is_serverless():
+        return {"written": 0}
+
     if storage is None:
         storage = CommitStorage()
 

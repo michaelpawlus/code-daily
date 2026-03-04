@@ -2,11 +2,18 @@
 SQLite-based storage for commit history.
 
 Provides persistent storage to track commits beyond GitHub API's limited event history.
+Supports Turso (libsql) for serverless deployment with automatic SQLite fallback.
 """
 
 import os
 import sqlite3
 from pathlib import Path
+
+try:
+    import libsql_experimental as libsql
+    HAS_LIBSQL = True
+except ImportError:
+    HAS_LIBSQL = False
 
 from src.github_client import GitHubClient
 from src.commit_parser import parse_commit_events
@@ -17,6 +24,9 @@ def _get_default_db_path() -> Path:
     env_path = os.environ.get("CODE_DAILY_DB_PATH")
     if env_path:
         return Path(env_path)
+    # Use /tmp on Vercel (read-only filesystem except /tmp)
+    if os.environ.get("TURSO_DATABASE_URL"):
+        return Path("/tmp/code-daily-replica.db")
     return Path.home() / ".code-daily" / "commits.db"
 
 
@@ -34,118 +44,159 @@ class CommitStorage:
         if db_path is None:
             db_path = _get_default_db_path()
         self.db_path = Path(db_path)
+
+        self._turso_url = os.environ.get("TURSO_DATABASE_URL")
+        self._turso_token = os.environ.get("TURSO_AUTH_TOKEN")
+        self._use_turso = bool(self._turso_url and self._turso_token and HAS_LIBSQL)
+
         self._init_db()
+
+    def _get_connection(self):
+        """Get a database connection (Turso or local SQLite)."""
+        if self._use_turso:
+            conn = libsql.connect(
+                str(self.db_path),
+                sync_url=self._turso_url,
+                auth_token=self._turso_token,
+            )
+            conn.sync()
+            return conn
+        return sqlite3.connect(self.db_path)
+
+    def _commit_and_sync(self, conn) -> None:
+        """Commit transaction and sync to Turso remote if applicable."""
+        conn.commit()
+        if self._use_turso and hasattr(conn, "sync"):
+            conn.sync()
+
+    @staticmethod
+    def _fetchall_as_dicts(cursor) -> list[dict]:
+        """Convert cursor fetchall results to list of dicts."""
+        rows = cursor.fetchall()
+        if not rows:
+            return []
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
+
+    @staticmethod
+    def _fetchone_as_dict(cursor) -> dict | None:
+        """Convert cursor fetchone result to dict or None."""
+        row = cursor.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cursor.description]
+        return dict(zip(columns, row))
 
     def _init_db(self) -> None:
         """Create tables and indexes if they don't exist."""
         # Ensure parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS commits (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,
-                    repo TEXT NOT NULL,
-                    sha TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(date, repo, sha)
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(date)
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS achievements (
-                    id TEXT PRIMARY KEY,
-                    unlocked_at TEXT NOT NULL,
-                    unlocked_value INTEGER
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS quests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source TEXT NOT NULL,
-                    source_ref TEXT,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    ai_description TEXT,
-                    difficulty INTEGER,
-                    difficulty_reasoning TEXT,
-                    enhanced_at TEXT
-                )
-            """)
-            # Add columns if they don't exist (for existing databases)
-            try:
-                conn.execute("ALTER TABLE quests ADD COLUMN ai_description TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            try:
-                conn.execute("ALTER TABLE quests ADD COLUMN difficulty INTEGER")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE quests ADD COLUMN difficulty_reasoning TEXT")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE quests ADD COLUMN enhanced_at TEXT")
-            except sqlite3.OperationalError:
-                pass
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_quests_source_ref ON quests(source, source_ref)
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS ideas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    status TEXT DEFAULT 'active',
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS external_cache (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    cache_key TEXT UNIQUE NOT NULL,
-                    data TEXT NOT NULL,
-                    fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TEXT NOT NULL
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_external_cache_key ON external_cache(cache_key)
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS notification_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,
-                    level INTEGER NOT NULL,
-                    channel TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    streak_value INTEGER,
-                    streak_active INTEGER
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_notification_log_date ON notification_log(date)
-            """)
-            conn.commit()
+        conn = self._get_connection()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS commits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                repo TEXT NOT NULL,
+                sha TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(date, repo, sha)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_commits_date ON commits(date)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS achievements (
+                id TEXT PRIMARY KEY,
+                unlocked_at TEXT NOT NULL,
+                unlocked_value INTEGER
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS quests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                source_ref TEXT,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                ai_description TEXT,
+                difficulty INTEGER,
+                difficulty_reasoning TEXT,
+                enhanced_at TEXT
+            )
+        """)
+        # Add columns if they don't exist (for existing databases)
+        try:
+            conn.execute("ALTER TABLE quests ADD COLUMN ai_description TEXT")
+        except Exception:
+            pass  # Column already exists
+        try:
+            conn.execute("ALTER TABLE quests ADD COLUMN difficulty INTEGER")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE quests ADD COLUMN difficulty_reasoning TEXT")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE quests ADD COLUMN enhanced_at TEXT")
+        except Exception:
+            pass
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_quests_status ON quests(status)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_quests_source_ref ON quests(source, source_ref)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ideas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS external_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT UNIQUE NOT NULL,
+                data TEXT NOT NULL,
+                fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                expires_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_external_cache_key ON external_cache(cache_key)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notification_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                level INTEGER NOT NULL,
+                channel TEXT NOT NULL,
+                message TEXT NOT NULL,
+                sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                streak_value INTEGER,
+                streak_active INTEGER
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notification_log_date ON notification_log(date)
+        """)
+        self._commit_and_sync(conn)
 
     def save_commits(self, commit_events: list[dict]) -> int:
         """
@@ -160,30 +211,30 @@ class CommitStorage:
             Number of new commits inserted
         """
         inserted = 0
-        with sqlite3.connect(self.db_path) as conn:
-            for event in commit_events:
-                date = event.get("date", "")
-                repo = event.get("repo", "")
-                commits = event.get("commits", [])
+        conn = self._get_connection()
+        for event in commit_events:
+            date = event.get("date", "")
+            repo = event.get("repo", "")
+            commits = event.get("commits", [])
 
-                for commit in commits:
-                    sha = commit.get("sha", "")
-                    message = commit.get("message", "")
+            for commit in commits:
+                sha = commit.get("sha", "")
+                message = commit.get("message", "")
 
-                    # Skip commits with missing required fields
-                    if not (date and repo and sha):
-                        continue
+                # Skip commits with missing required fields
+                if not (date and repo and sha):
+                    continue
 
-                    cursor = conn.execute(
-                        """
-                        INSERT OR IGNORE INTO commits (date, repo, sha, message)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (date, repo, sha, message),
-                    )
-                    inserted += cursor.rowcount
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO commits (date, repo, sha, message)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (date, repo, sha, message),
+                )
+                inserted += cursor.rowcount
 
-            conn.commit()
+        self._commit_and_sync(conn)
         return inserted
 
     def get_all_commits(self) -> list[dict]:
@@ -214,27 +265,28 @@ class CommitStorage:
 
         Groups commits by date and repo to match parse_commit_events format.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        conn = self._get_connection()
 
-            if since_date:
-                rows = conn.execute(
-                    """
-                    SELECT date, repo, sha, message
-                    FROM commits
-                    WHERE date >= ?
-                    ORDER BY date DESC, repo, id
-                    """,
-                    (since_date,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT date, repo, sha, message
-                    FROM commits
-                    ORDER BY date DESC, repo, id
-                    """,
-                ).fetchall()
+        if since_date:
+            cursor = conn.execute(
+                """
+                SELECT date, repo, sha, message
+                FROM commits
+                WHERE date >= ?
+                ORDER BY date DESC, repo, id
+                """,
+                (since_date,),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                SELECT date, repo, sha, message
+                FROM commits
+                ORDER BY date DESC, repo, id
+                """,
+            )
+
+        rows = self._fetchall_as_dicts(cursor)
 
         # Group commits by (date, repo) to match parse_commit_events format
         events_dict: dict[tuple[str, str], list[dict]] = {}
@@ -268,19 +320,19 @@ class CommitStorage:
         Returns:
             List of dates in YYYY-MM-DD format, sorted descending.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT DISTINCT date FROM commits ORDER BY date DESC
-                """
-            ).fetchall()
+        conn = self._get_connection()
+        rows = conn.execute(
+            """
+            SELECT DISTINCT date FROM commits ORDER BY date DESC
+            """
+        ).fetchall()
         return [row[0] for row in rows]
 
     def clear(self) -> None:
         """Delete all commits from the database. Primarily for testing."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM commits")
-            conn.commit()
+        conn = self._get_connection()
+        conn.execute("DELETE FROM commits")
+        self._commit_and_sync(conn)
 
     def get_setting(self, key: str, default: str | None = None) -> str | None:
         """
@@ -293,11 +345,11 @@ class CommitStorage:
         Returns:
             The setting value or default
         """
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?",
-                (key,),
-            ).fetchone()
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (key,),
+        ).fetchone()
         return row[0] if row else default
 
     def set_setting(self, key: str, value: str) -> None:
@@ -308,18 +360,18 @@ class CommitStorage:
             key: The setting key
             value: The value to store
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO settings (key, value, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at = excluded.updated_at
-                """,
-                (key, value),
-            )
-            conn.commit()
+        conn = self._get_connection()
+        conn.execute(
+            """
+            INSERT INTO settings (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value),
+        )
+        self._commit_and_sync(conn)
 
     def get_unlocked_achievements(self) -> list[dict]:
         """
@@ -328,12 +380,11 @@ class CommitStorage:
         Returns:
             List of achievement records with id, unlocked_at, and unlocked_value
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT id, unlocked_at, unlocked_value FROM achievements"
-            ).fetchall()
-        return [dict(row) for row in rows]
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT id, unlocked_at, unlocked_value FROM achievements"
+        )
+        return self._fetchall_as_dicts(cursor)
 
     def save_achievement(self, achievement_id: str, unlocked_value: int | None = None) -> bool:
         """
@@ -348,22 +399,22 @@ class CommitStorage:
         Returns:
             True if the achievement was newly saved, False if it already existed
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                INSERT OR IGNORE INTO achievements (id, unlocked_at, unlocked_value)
-                VALUES (?, datetime('now'), ?)
-                """,
-                (achievement_id, unlocked_value),
-            )
-            conn.commit()
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO achievements (id, unlocked_at, unlocked_value)
+            VALUES (?, datetime('now'), ?)
+            """,
+            (achievement_id, unlocked_value),
+        )
+        self._commit_and_sync(conn)
         return cursor.rowcount > 0
 
     def reset_achievements(self) -> None:
         """Delete all achievements. For debugging/reset purposes."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM achievements")
-            conn.commit()
+        conn = self._get_connection()
+        conn.execute("DELETE FROM achievements")
+        self._commit_and_sync(conn)
 
     # Quest methods
     def get_quests(self, status: str | None = None, limit: int | None = None) -> list[dict]:
@@ -377,23 +428,22 @@ class CommitStorage:
         Returns:
             List of quest dictionaries
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            query = "SELECT * FROM quests"
-            params: list = []
+        conn = self._get_connection()
+        query = "SELECT * FROM quests"
+        params: list = []
 
-            if status:
-                query += " WHERE status = ?"
-                params.append(status)
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
 
-            query += " ORDER BY created_at DESC"
+        query += " ORDER BY created_at DESC"
 
-            if limit:
-                query += " LIMIT ?"
-                params.append(limit)
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
 
-            rows = conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        cursor = conn.execute(query, params)
+        return self._fetchall_as_dicts(cursor)
 
     def get_quest(self, quest_id: int) -> dict | None:
         """
@@ -405,13 +455,12 @@ class CommitStorage:
         Returns:
             Quest dictionary or None if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT * FROM quests WHERE id = ?",
-                (quest_id,),
-            ).fetchone()
-        return dict(row) if row else None
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT * FROM quests WHERE id = ?",
+            (quest_id,),
+        )
+        return self._fetchone_as_dict(cursor)
 
     def create_quest(
         self,
@@ -432,16 +481,16 @@ class CommitStorage:
         Returns:
             ID of the created quest
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO quests (title, source, source_ref, description)
-                VALUES (?, ?, ?, ?)
-                """,
-                (title, source, source_ref, description),
-            )
-            conn.commit()
-            return cursor.lastrowid
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            INSERT INTO quests (title, source, source_ref, description)
+            VALUES (?, ?, ?, ?)
+            """,
+            (title, source, source_ref, description),
+        )
+        self._commit_and_sync(conn)
+        return cursor.lastrowid
 
     def quest_exists_by_source_ref(self, source: str, source_ref: str) -> bool:
         """
@@ -456,11 +505,11 @@ class CommitStorage:
         Returns:
             True if quest exists, False otherwise
         """
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT 1 FROM quests WHERE source = ? AND source_ref = ? LIMIT 1",
-                (source, source_ref),
-            ).fetchone()
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT 1 FROM quests WHERE source = ? AND source_ref = ? LIMIT 1",
+            (source, source_ref),
+        ).fetchone()
         return row is not None
 
     def update_quest_status(self, quest_id: int, status: str) -> bool:
@@ -474,17 +523,17 @@ class CommitStorage:
         Returns:
             True if quest was updated, False if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE quests
-                SET status = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (status, quest_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            UPDATE quests
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, quest_id),
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
 
     def delete_quest(self, quest_id: int) -> bool:
         """
@@ -496,10 +545,10 @@ class CommitStorage:
         Returns:
             True if quest was deleted, False if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("DELETE FROM quests WHERE id = ?", (quest_id,))
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        cursor = conn.execute("DELETE FROM quests WHERE id = ?", (quest_id,))
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
 
     def update_quest_ai_fields(
         self,
@@ -520,21 +569,21 @@ class CommitStorage:
         Returns:
             True if quest was updated, False if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE quests
-                SET ai_description = ?,
-                    difficulty = ?,
-                    difficulty_reasoning = ?,
-                    enhanced_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (ai_description, difficulty, difficulty_reasoning, quest_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            UPDATE quests
+            SET ai_description = ?,
+                difficulty = ?,
+                difficulty_reasoning = ?,
+                enhanced_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (ai_description, difficulty, difficulty_reasoning, quest_id),
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
 
     def get_quests_without_ai(self, limit: int = 5) -> list[dict]:
         """
@@ -546,18 +595,17 @@ class CommitStorage:
         Returns:
             List of quest dictionaries without AI enhancement
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT * FROM quests
-                WHERE status = 'pending' AND enhanced_at IS NULL
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT * FROM quests
+            WHERE status = 'pending' AND enhanced_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return self._fetchall_as_dicts(cursor)
 
     # Ideas methods
     def get_ideas(self, status: str | None = None) -> list[dict]:
@@ -570,18 +618,17 @@ class CommitStorage:
         Returns:
             List of idea dictionaries
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM ideas WHERE status = ? ORDER BY created_at DESC",
-                    (status,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM ideas ORDER BY created_at DESC"
-                ).fetchall()
-        return [dict(row) for row in rows]
+        conn = self._get_connection()
+        if status:
+            cursor = conn.execute(
+                "SELECT * FROM ideas WHERE status = ? ORDER BY created_at DESC",
+                (status,),
+            )
+        else:
+            cursor = conn.execute(
+                "SELECT * FROM ideas ORDER BY created_at DESC"
+            )
+        return self._fetchall_as_dicts(cursor)
 
     def get_idea(self, idea_id: int) -> dict | None:
         """
@@ -593,13 +640,12 @@ class CommitStorage:
         Returns:
             Idea dictionary or None if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT * FROM ideas WHERE id = ?",
-                (idea_id,),
-            ).fetchone()
-        return dict(row) if row else None
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT * FROM ideas WHERE id = ?",
+            (idea_id,),
+        )
+        return self._fetchone_as_dict(cursor)
 
     def create_idea(self, content: str) -> int:
         """
@@ -611,13 +657,13 @@ class CommitStorage:
         Returns:
             ID of the created idea
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "INSERT INTO ideas (content) VALUES (?)",
-                (content,),
-            )
-            conn.commit()
-            return cursor.lastrowid
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "INSERT INTO ideas (content) VALUES (?)",
+            (content,),
+        )
+        self._commit_and_sync(conn)
+        return cursor.lastrowid
 
     def update_idea_status(self, idea_id: int, status: str) -> bool:
         """
@@ -630,17 +676,17 @@ class CommitStorage:
         Returns:
             True if idea was updated, False if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE ideas
-                SET status = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (status, idea_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            UPDATE ideas
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, idea_id),
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
 
     def delete_idea(self, idea_id: int) -> bool:
         """
@@ -652,10 +698,10 @@ class CommitStorage:
         Returns:
             True if idea was deleted, False if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
-            conn.commit()
-            return cursor.rowcount > 0
+        conn = self._get_connection()
+        cursor = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
 
     # Notification log methods
     def log_notification(
@@ -681,16 +727,16 @@ class CommitStorage:
         Returns:
             ID of the log entry
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO notification_log (date, level, channel, message, streak_value, streak_active)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (date, level, channel, message, streak_value, int(streak_active)),
-            )
-            conn.commit()
-            return cursor.lastrowid
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            INSERT INTO notification_log (date, level, channel, message, streak_value, streak_active)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (date, level, channel, message, streak_value, int(streak_active)),
+        )
+        self._commit_and_sync(conn)
+        return cursor.lastrowid
 
     def get_notifications_for_date(self, date: str) -> list[dict]:
         """
@@ -702,13 +748,12 @@ class CommitStorage:
         Returns:
             List of notification log dictionaries
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM notification_log WHERE date = ? ORDER BY sent_at",
-                (date,),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT * FROM notification_log WHERE date = ? ORDER BY sent_at",
+            (date,),
+        )
+        return self._fetchall_as_dicts(cursor)
 
     def get_max_level_sent_today(self, date: str) -> int | None:
         """
@@ -722,11 +767,11 @@ class CommitStorage:
         Returns:
             Highest level sent, or None if no notifications sent today
         """
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute(
-                "SELECT MAX(level) FROM notification_log WHERE date = ?",
-                (date,),
-            ).fetchone()
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT MAX(level) FROM notification_log WHERE date = ?",
+            (date,),
+        ).fetchone()
         return row[0] if row and row[0] is not None else None
 
     def get_notification_history(self, limit: int = 30) -> list[dict]:
@@ -739,13 +784,12 @@ class CommitStorage:
         Returns:
             List of notification log dictionaries, most recent first
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM notification_log ORDER BY sent_at DESC, id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT * FROM notification_log ORDER BY sent_at DESC, id DESC LIMIT ?",
+            (limit,),
+        )
+        return self._fetchall_as_dicts(cursor)
 
     # External cache methods
     def get_cache(self, cache_key: str) -> str | None:
@@ -758,16 +802,15 @@ class CommitStorage:
         Returns:
             Cached JSON data as string, or None if not found/expired
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT data FROM external_cache
-                WHERE cache_key = ? AND expires_at > datetime('now')
-                """,
-                (cache_key,),
-            ).fetchone()
-        return row["data"] if row else None
+        conn = self._get_connection()
+        row = conn.execute(
+            """
+            SELECT data FROM external_cache
+            WHERE cache_key = ? AND expires_at > datetime('now')
+            """,
+            (cache_key,),
+        ).fetchone()
+        return row[0] if row else None
 
     def set_cache(self, cache_key: str, data: str, hours: int = 24) -> None:
         """
@@ -778,19 +821,19 @@ class CommitStorage:
             data: JSON string data to cache
             hours: Hours until expiration (default 24)
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO external_cache (cache_key, data, expires_at)
-                VALUES (?, ?, datetime('now', '+' || ? || ' hours'))
-                ON CONFLICT(cache_key) DO UPDATE SET
-                    data = excluded.data,
-                    fetched_at = CURRENT_TIMESTAMP,
-                    expires_at = excluded.expires_at
-                """,
-                (cache_key, data, hours),
-            )
-            conn.commit()
+        conn = self._get_connection()
+        conn.execute(
+            """
+            INSERT INTO external_cache (cache_key, data, expires_at)
+            VALUES (?, ?, datetime('now', '+' || ? || ' hours'))
+            ON CONFLICT(cache_key) DO UPDATE SET
+                data = excluded.data,
+                fetched_at = CURRENT_TIMESTAMP,
+                expires_at = excluded.expires_at
+            """,
+            (cache_key, data, hours),
+        )
+        self._commit_and_sync(conn)
 
     def clear_expired_cache(self) -> int:
         """
@@ -799,12 +842,12 @@ class CommitStorage:
         Returns:
             Number of entries removed
         """
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM external_cache WHERE expires_at <= datetime('now')"
-            )
-            conn.commit()
-            return cursor.rowcount
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "DELETE FROM external_cache WHERE expires_at <= datetime('now')"
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount
 
 
 def get_commit_events_with_history(
