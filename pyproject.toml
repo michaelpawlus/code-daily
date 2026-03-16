@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "code-daily"
+version = "0.1.0"
+description = "A gamified coding habit tracker"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "httpx>=0.27.0",
+    "jinja2>=3.1.0",
+    "anthropic>=0.40.0",
+    "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+turso = ["libsql-experimental>=0.0.68"]
+
+[project.scripts]
+code-daily = "src.typer_cli:app"
+
+[tool.setuptools.packages.find]
+include = ["src*"]

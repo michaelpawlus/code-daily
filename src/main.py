@@ -214,4 +214,5 @@ def main():
 
 
 if __name__ == "__main__":
-    exit(main())
+    from src.typer_cli import app as typer_app
+    typer_app()
