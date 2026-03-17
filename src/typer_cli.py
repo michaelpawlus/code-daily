@@ -18,9 +18,11 @@ app = typer.Typer(help="code-daily: A gamified coding habit tracker")
 issues_app = typer.Typer(help="GitHub issues commands")
 vault_app = typer.Typer(help="Obsidian vault commands")
 notify_app = typer.Typer(help="Notification commands")
+news_app = typer.Typer(help="AI news commands")
 app.add_typer(issues_app, name="issues")
 app.add_typer(vault_app, name="vault")
 app.add_typer(notify_app, name="notify")
+app.add_typer(news_app, name="news")
 
 
 def _output(data, as_json: bool, human_fn=None):
@@ -397,6 +399,57 @@ def cron():
     from src.main import _run_setup_cron
 
     _run_setup_cron()
+
+
+# ---------------------------------------------------------------------------
+# news subcommands
+# ---------------------------------------------------------------------------
+
+
+@news_app.command("digest")
+def news_digest(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    sources: Optional[str] = typer.Option(None, help="Comma-separated sources (hackernews,reddit,arxiv)"),
+    hours: int = typer.Option(24, help="Hours back to fetch"),
+    limit: int = typer.Option(25, help="Max items per source"),
+    no_write: bool = typer.Option(False, "--no-write", help="Skip writing to Obsidian vault"),
+):
+    """Fetch AI news digest from multiple sources."""
+    from src.news_digest import collect_news, write_digest_to_vault
+
+    source_list = [s.strip() for s in sources.split(",")] if sources else None
+    digest = collect_news(sources=source_list, hours_back=hours, limit=limit)
+
+    if not no_write:
+        try:
+            vault_path = _get_vault_path()
+            rel_path = write_digest_to_vault(vault_path, digest)
+            digest["vault_file"] = rel_path
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"Vault write failed: {e}", file=sys.stderr)
+
+    def _human(d):
+        print(f"AI News Digest — {d['date']}\n")
+        for src_name, meta in d["sources"].items():
+            status = "OK" if meta["success"] else f"FAIL: {meta['error']}"
+            print(f"  {src_name}: {meta['count']} items ({status})")
+        print()
+
+        for item in d["items"]:
+            score_str = f"[{item['score']}]" if item["score"] else ""
+            sub_str = f" {item['subreddit']}" if item.get("subreddit") else ""
+            print(f"  {score_str} {item['title']}")
+            print(f"    {item['source']}{sub_str}  {item['url']}")
+            if item.get("summary"):
+                print(f"    {item['summary'][:120]}...")
+            print()
+
+        if d.get("vault_file"):
+            print(f"Written to vault: {d['vault_file']}")
+
+    _output(digest, json_output, _human)
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,7 @@ code-daily vault ideas [--json]
 code-daily suggest [--json]
 code-daily dashboard [--json]
 code-daily check LEVEL [--dry-run] [--json]
+code-daily news digest [--json] [--sources TEXT] [--hours INT] [--limit INT] [--no-write]
 code-daily notify test
 code-daily notify status
 code-daily cron
