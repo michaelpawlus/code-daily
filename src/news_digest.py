@@ -136,6 +136,62 @@ def write_digest_to_vault(vault_path: str, digest: dict) -> str:
     return rel_path
 
 
+def write_synthesized_digest_to_vault(vault_path: str, digest: dict, synthesis: dict) -> str:
+    """Write themed synthesized digest to the Obsidian vault. Returns relative file path."""
+    digest_date = digest["date"]
+    source_names = sorted(digest["sources"].keys())
+
+    lines = [
+        "---",
+        f"date: {digest_date}",
+        "tags: [ai-news, digest, daily, synthesized]",
+        f"sources: [{', '.join(source_names)}]",
+        f"total_items: {digest['total_count']}",
+        "---",
+        "",
+        f"# AI News Digest — {digest_date}",
+        "",
+        "## Overview",
+        synthesis.get("overview", ""),
+        "",
+    ]
+
+    for section in synthesis.get("sections", []):
+        lines.append(f"## {section['name']}")
+        if section.get("summary"):
+            lines.append(section["summary"])
+            lines.append("")
+
+        for item in section.get("items", []):
+            title = item.get("title", "")
+            url = item.get("url", "")
+            source = item.get("source", "")
+            score = item.get("score", 0)
+            commentary = item.get("commentary", "")
+
+            # Build source/score tag
+            meta_parts = []
+            if source:
+                meta_parts.append(source.capitalize())
+            if score:
+                meta_parts.append(f"{score}pts")
+            meta_str = f" ({', '.join(meta_parts)})" if meta_parts else ""
+
+            comment_str = f" — {commentary}" if commentary else ""
+            lines.append(f"- [{title}]({url}){meta_str}{comment_str}")
+
+        lines.append("")
+
+    rel_path = f"ai-news/{digest_date}.md"
+    full_path = os.path.join(vault_path, rel_path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+    with open(full_path, "w") as f:
+        f.write("\n".join(lines))
+
+    return rel_path
+
+
 def _escape_pipe(text: str) -> str:
     """Escape pipe characters for markdown tables."""
     return text.replace("|", "\\|")

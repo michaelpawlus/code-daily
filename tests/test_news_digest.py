@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.news_digest import collect_news, write_digest_to_vault
+from src.news_digest import collect_news, write_digest_to_vault, write_synthesized_digest_to_vault
 from src.news_fetchers import FetchResult, NewsItem
 
 
@@ -131,3 +131,71 @@ def test_write_digest_pipe_escape(tmp_path):
     content = (tmp_path / "ai-news" / "2026-03-16.md").read_text()
     assert "A \\| B comparison" in content
     assert "X \\| Y results" in content
+
+
+# ---------------------------------------------------------------------------
+# write_synthesized_digest_to_vault
+# ---------------------------------------------------------------------------
+
+
+def test_write_synthesized_digest_to_vault(tmp_path):
+    digest = {
+        "date": "2026-03-17",
+        "sources": {
+            "hackernews": {"count": 2, "success": True, "error": ""},
+            "arxiv": {"count": 1, "success": True, "error": ""},
+        },
+        "total_count": 3,
+    }
+
+    synthesis = {
+        "overview": "Today was dominated by GPT-5 and new tooling.",
+        "sections": [
+            {
+                "name": "Industry & Labs",
+                "slug": "industry-labs",
+                "summary": "Big releases from labs.",
+                "items": [
+                    {
+                        "title": "GPT-5 Released",
+                        "url": "https://example.com/1",
+                        "source": "hackernews",
+                        "score": 100,
+                        "commentary": "Major release.",
+                    }
+                ],
+            },
+            {
+                "name": "Challenge Your Thinking",
+                "slug": "challenge-your-thinking",
+                "summary": "Consider another angle.",
+                "items": [
+                    {
+                        "title": "AI Skeptic View",
+                        "url": "https://example.com/2",
+                        "source": "reddit",
+                        "score": 30,
+                        "commentary": "Worth considering.",
+                    }
+                ],
+            },
+        ],
+    }
+
+    rel_path = write_synthesized_digest_to_vault(str(tmp_path), digest, synthesis)
+    assert rel_path == "ai-news/2026-03-17.md"
+
+    full_path = tmp_path / "ai-news" / "2026-03-17.md"
+    assert full_path.exists()
+
+    content = full_path.read_text()
+    assert "date: 2026-03-17" in content
+    assert "tags: [ai-news, digest, daily, synthesized]" in content
+    assert "## Overview" in content
+    assert "Today was dominated by GPT-5" in content
+    assert "## Industry & Labs" in content
+    assert "[GPT-5 Released](https://example.com/1)" in content
+    assert "100pts" in content
+    assert "Major release." in content
+    assert "## Challenge Your Thinking" in content
+    assert "[AI Skeptic View](https://example.com/2)" in content

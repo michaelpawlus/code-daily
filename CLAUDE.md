@@ -35,3 +35,29 @@ code-daily cron
 ```
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).
+
+## Agent Workflow: Themed News Digest
+
+The `news digest` command collects raw items. Synthesis into a themed, curated digest is done by Claude Code in-session (not via API). The workflow:
+
+1. Run `code-daily news digest --json --no-write` to collect raw items
+2. Load user context from vault: `code-daily vault ideas --json`
+3. Synthesize in-session: curate items into themed sections (Industry & Labs, Tools & Workflows, Research, Relevant to You, Challenge Your Thinking)
+4. Write the themed digest to the vault using `write_synthesized_digest_to_vault()` from `src/news_digest`
+
+The synthesized digest structure expected by the vault writer:
+```python
+{
+    "overview": "2-3 sentence summary of today's themes",
+    "sections": [
+        {
+            "name": "Section Name",
+            "slug": "section-slug",
+            "summary": "1-2 sentence section intro",
+            "items": [
+                {"title": "...", "url": "...", "source": "...", "score": 0, "commentary": "1 sentence"}
+            ]
+        }
+    ]
+}
+```
