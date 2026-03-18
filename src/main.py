@@ -151,16 +151,16 @@ def _run_setup_cron() -> int:
     print("# Add these to your crontab with: crontab -e")
     print()
     print(f"# Level 1: Morning gentle reminder (10 AM)")
-    print(f"0 10 * * * cd {project_dir} && {venv_python} src/main.py --check 1")
+    print(f"0 10 * * * cd {project_dir} && {venv_python} -m src.typer_cli check 1")
     print()
     print(f"# Level 2: Afternoon nudge (4 PM)")
-    print(f"0 16 * * * cd {project_dir} && {venv_python} src/main.py --check 2")
+    print(f"0 16 * * * cd {project_dir} && {venv_python} -m src.typer_cli check 2")
     print()
     print(f"# Level 3: Evening urgent (7 PM)")
-    print(f"0 19 * * * cd {project_dir} && {venv_python} src/main.py --check 3")
+    print(f"0 19 * * * cd {project_dir} && {venv_python} -m src.typer_cli check 3")
     print()
     print(f"# Level 4: Night critical (9 PM)")
-    print(f"0 21 * * * cd {project_dir} && {venv_python} src/main.py --check 4")
+    print(f"0 21 * * * cd {project_dir} && {venv_python} -m src.typer_cli check 4")
 
     return 0
 

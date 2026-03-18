@@ -124,17 +124,19 @@ class NtfyChannel(NotificationChannel):
         if not self.is_configured:
             return False
 
-        priority = NTFY_PRIORITY_MAP.get(level, "3")
-        url = f"{self._server}/{self._topic}"
+        priority = int(NTFY_PRIORITY_MAP.get(level, "3"))
+        tags = ["computer", "fire"] if level >= 3 else ["computer"]
+        url = f"{self._server}"
 
         try:
             resp = requests.post(
                 url,
-                data=message.encode("utf-8"),
-                headers={
-                    "Title": title,
-                    "Priority": priority,
-                    "Tags": "computer,fire" if level >= 3 else "computer",
+                json={
+                    "topic": self._topic,
+                    "title": title,
+                    "message": message,
+                    "priority": priority,
+                    "tags": tags,
                 },
                 timeout=10,
             )
@@ -209,7 +211,10 @@ class NotificationManager:
 
         # Build message
         message = build_message(level, current_streak, streak_active)
-        title = "code-daily streak reminder"
+        if current_streak > 0:
+            title = f"code-daily: {current_streak}-day streak at risk!"
+        else:
+            title = "code-daily: start a streak today!"
 
         if dry_run:
             return {

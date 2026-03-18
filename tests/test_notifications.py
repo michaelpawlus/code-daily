@@ -111,9 +111,12 @@ class TestNtfyChannel:
         assert result is True
         mock_post.assert_called_once()
         call_args = mock_post.call_args
-        assert call_args.args[0] == "https://ntfy.sh/test-topic"
-        assert call_args.kwargs["headers"]["Title"] == "Test Title"
-        assert call_args.kwargs["headers"]["Priority"] == NTFY_PRIORITY_MAP[2]
+        assert call_args.args[0] == "https://ntfy.sh"
+        payload = call_args.kwargs["json"]
+        assert payload["topic"] == "test-topic"
+        assert payload["title"] == "Test Title"
+        assert payload["message"] == "Hello"
+        assert payload["priority"] == int(NTFY_PRIORITY_MAP[2])
 
     @patch("src.notifications.requests.post")
     def test_send_failure_status(self, mock_post):
@@ -143,8 +146,8 @@ class TestNtfyChannel:
 
         for level, expected_priority in NTFY_PRIORITY_MAP.items():
             ch.send("msg", "title", level)
-            call_headers = mock_post.call_args.kwargs["headers"]
-            assert call_headers["Priority"] == expected_priority
+            payload = mock_post.call_args.kwargs["json"]
+            assert payload["priority"] == int(expected_priority)
 
     @patch("src.notifications.requests.post")
     def test_high_level_gets_fire_tags(self, mock_post):
@@ -153,10 +156,10 @@ class TestNtfyChannel:
         ch = NtfyChannel(topic="t", server="https://ntfy.sh")
 
         ch.send("msg", "title", 3)
-        assert "fire" in mock_post.call_args.kwargs["headers"]["Tags"]
+        assert "fire" in mock_post.call_args.kwargs["json"]["tags"]
 
         ch.send("msg", "title", 1)
-        assert "fire" not in mock_post.call_args.kwargs["headers"]["Tags"]
+        assert "fire" not in mock_post.call_args.kwargs["json"]["tags"]
 
     def test_server_trailing_slash_stripped(self):
         ch = NtfyChannel(topic="t", server="https://ntfy.sh/")
