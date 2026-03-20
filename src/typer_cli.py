@@ -19,10 +19,12 @@ issues_app = typer.Typer(help="GitHub issues commands")
 vault_app = typer.Typer(help="Obsidian vault commands")
 notify_app = typer.Typer(help="Notification commands")
 news_app = typer.Typer(help="AI news commands")
+streak_app = typer.Typer(help="Streak tracking commands")
 app.add_typer(issues_app, name="issues")
 app.add_typer(vault_app, name="vault")
 app.add_typer(notify_app, name="notify")
 app.add_typer(news_app, name="news")
+app.add_typer(streak_app, name="streak")
 
 
 def _output(data, as_json: bool, human_fn=None):
@@ -169,6 +171,124 @@ def vault_ideas(
         for item in d:
             print(f"  *** {item['content']}")
             print(f"      {item['source_file']}")
+
+    _output(data, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# streak subcommands
+# ---------------------------------------------------------------------------
+
+
+@streak_app.command("show")
+def streak_show(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show your current streak status with motivational context."""
+    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
+    from src.github_client import GitHubClient, GitHubClientError
+    from src.storage import CommitStorage, get_commit_events_with_history
+    from src.streak_calculator import calculate_streak
+
+    try:
+        validate_config()
+    except ValueError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
+
+    try:
+        commit_events = get_commit_events_with_history(client, storage)
+    except GitHubClientError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    streak_info = calculate_streak(commit_events) if commit_events else {
+        "current_streak": 0, "longest_streak": 0,
+        "streak_active": False, "last_commit_date": None, "commit_dates": [],
+    }
+
+    current = streak_info["current_streak"]
+    longest = streak_info["longest_streak"]
+    active = streak_info["streak_active"]
+    days_to_record = max(0, longest - current + 1) if current < longest else 0
+    is_record = current >= longest and current > 0
+
+    data = {
+        "current_streak": current,
+        "longest_streak": longest,
+        "streak_active": active,
+        "last_commit_date": streak_info["last_commit_date"],
+        "days_to_record": days_to_record,
+        "is_record": is_record,
+    }
+
+    def _human(d):
+        cur = d["current_streak"]
+        lng = d["longest_streak"]
+        act = d["streak_active"]
+
+        # Streak flame display
+        if cur == 0:
+            print("  No active streak. Today is day 1 if you commit!")
+        else:
+            flame = "🔥" * min(cur, 10)
+            print(f"  {flame} {cur}-day streak")
+
+        print()
+
+        # Active status
+        if act:
+            print("  ✅ You've committed today. Streak is safe!")
+        else:
+            print("  ⏳ No commit yet today. Your streak needs you!")
+
+        print()
+
+        # Record context
+        if d["is_record"]:
+            print(f"  🏆 You're at your all-time record! Keep going!")
+        elif d["days_to_record"] > 0:
+            print(f"  📊 Longest streak: {lng} days ({d['days_to_record']} more to beat it)")
+        else:
+            print(f"  📊 Longest streak: {lng} days")
+
+        if d["last_commit_date"]:
+            print(f"  📅 Last commit: {d['last_commit_date']}")
+
+    _output(data, json_output, _human)
+
+
+@streak_app.command("history")
+def streak_history(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    days: int = typer.Option(30, help="Number of days to show"),
+):
+    """Show recent notification history and streak activity."""
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    notifications = storage.get_notification_history(limit=days)
+
+    data = {"notifications": notifications, "count": len(notifications)}
+
+    def _human(d):
+        if not d["notifications"]:
+            print("No notifications sent yet.")
+            print("Run 'code-daily cron --install' to set up daily reminders.")
+            return
+        print(f"Last {d['count']} notifications:\n")
+        for n in d["notifications"]:
+            level_icon = {1: "🌅", 2: "☀️", 3: "🌆", 4: "🚨"}.get(n["level"], "?")
+            print(f"  {level_icon} [{n['date']}] L{n['level']} via {n['channel']}: {n['message'][:60]}...")
 
     _output(data, json_output, _human)
 
@@ -394,11 +514,95 @@ def notify_status():
 
 
 @app.command()
-def cron():
-    """Print crontab entries for the escalating notification schedule."""
-    from src.main import _run_setup_cron
+def cron(
+    install: bool = typer.Option(False, "--install", help="Install cron entries into crontab"),
+    uninstall: bool = typer.Option(False, "--uninstall", help="Remove code-daily entries from crontab"),
+):
+    """Print or install crontab entries for the escalating notification schedule."""
+    from src.main import _run_setup_cron, _get_cron_entries
 
-    _run_setup_cron()
+    if install:
+        _install_cron()
+    elif uninstall:
+        _uninstall_cron()
+    else:
+        _run_setup_cron()
+
+
+def _install_cron():
+    """Install code-daily cron entries into the user's crontab."""
+    import subprocess
+    from src.main import _get_cron_entries
+
+    new_entries = _get_cron_entries()
+
+    # Read existing crontab
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"], capture_output=True, text=True, check=False,
+        )
+        existing = result.stdout if result.returncode == 0 else ""
+    except FileNotFoundError:
+        print("Error: crontab not found on this system.", file=sys.stderr)
+        raise typer.Exit(1)
+
+    # Check if already installed
+    if "code-daily" in existing:
+        print("code-daily cron entries already exist. Use --uninstall first to replace them.")
+        raise typer.Exit(0)
+
+    # Append new entries
+    updated = existing.rstrip("\n") + "\n\n" + new_entries + "\n"
+
+    result = subprocess.run(
+        ["crontab", "-"], input=updated, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(f"Failed to install crontab: {result.stderr}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    print("Installed code-daily cron entries:")
+    print()
+    print(new_entries)
+    print()
+    print("Reminders will fire at 10 AM, 4 PM, 7 PM, and 9 PM daily.")
+    print("Use 'code-daily cron --uninstall' to remove them.")
+
+
+def _uninstall_cron():
+    """Remove code-daily cron entries from the user's crontab."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"], capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            print("No crontab to modify.")
+            raise typer.Exit(0)
+        existing = result.stdout
+    except FileNotFoundError:
+        print("Error: crontab not found on this system.", file=sys.stderr)
+        raise typer.Exit(1)
+
+    if "code-daily" not in existing:
+        print("No code-daily entries found in crontab.")
+        raise typer.Exit(0)
+
+    # Remove code-daily block (lines containing "code-daily")
+    lines = existing.split("\n")
+    filtered = [line for line in lines if "code-daily" not in line]
+    # Clean up consecutive blank lines
+    cleaned = "\n".join(filtered).strip() + "\n"
+
+    result = subprocess.run(
+        ["crontab", "-"], input=cleaned, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(f"Failed to update crontab: {result.stderr}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    print("Removed code-daily cron entries.")
 
 
 # ---------------------------------------------------------------------------

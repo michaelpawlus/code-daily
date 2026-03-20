@@ -163,6 +163,81 @@ class TestVaultIdeas:
 
 
 # ---------------------------------------------------------------------------
+# streak
+# ---------------------------------------------------------------------------
+
+
+MOCK_COMMIT_EVENTS = [
+    {"date": "2026-03-18", "repo": "user/repo", "commits": [{"sha": "a1", "message": "test"}], "commit_count": 1},
+    {"date": "2026-03-17", "repo": "user/repo", "commits": [{"sha": "a2", "message": "test"}], "commit_count": 1},
+    {"date": "2026-03-16", "repo": "user/repo", "commits": [{"sha": "a3", "message": "test"}], "commit_count": 1},
+]
+
+
+class TestStreakShow:
+    @patch("src.storage.get_commit_events_with_history", return_value=MOCK_COMMIT_EVENTS)
+    @patch("src.storage.CommitStorage")
+    @patch("src.github_client.GitHubClient")
+    @patch("src.config.validate_config")
+    def test_json_output(self, mock_config, mock_client, mock_storage, mock_commits):
+        result = runner.invoke(app, ["streak", "show", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "current_streak" in data
+        assert "longest_streak" in data
+        assert "days_to_record" in data
+        assert "is_record" in data
+
+    @patch("src.storage.get_commit_events_with_history", return_value=MOCK_COMMIT_EVENTS)
+    @patch("src.storage.CommitStorage")
+    @patch("src.github_client.GitHubClient")
+    @patch("src.config.validate_config")
+    def test_human_output(self, mock_config, mock_client, mock_storage, mock_commits):
+        result = runner.invoke(app, ["streak", "show"])
+        assert result.exit_code == 0
+        assert "streak" in result.output.lower()
+
+    @patch("src.storage.get_commit_events_with_history", return_value=[])
+    @patch("src.storage.CommitStorage")
+    @patch("src.github_client.GitHubClient")
+    @patch("src.config.validate_config")
+    def test_no_commits(self, mock_config, mock_client, mock_storage, mock_commits):
+        result = runner.invoke(app, ["streak", "show", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["current_streak"] == 0
+        assert data["is_record"] is False
+
+    @patch("src.config.validate_config", side_effect=ValueError("Missing GITHUB_TOKEN"))
+    def test_config_error(self, mock_config):
+        result = runner.invoke(app, ["streak", "show", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+
+
+class TestStreakHistory:
+    @patch("src.storage.CommitStorage")
+    def test_empty_history(self, mock_storage_cls):
+        instance = mock_storage_cls.return_value
+        instance.get_notification_history.return_value = []
+        result = runner.invoke(app, ["streak", "history"])
+        assert result.exit_code == 0
+        assert "No notifications" in result.output
+
+    @patch("src.storage.CommitStorage")
+    def test_json_output(self, mock_storage_cls):
+        instance = mock_storage_cls.return_value
+        instance.get_notification_history.return_value = [
+            {"date": "2026-03-18", "level": 1, "channel": "ntfy", "message": "test msg"},
+        ]
+        result = runner.invoke(app, ["streak", "history", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["count"] == 1
+
+
+# ---------------------------------------------------------------------------
 # suggest
 # ---------------------------------------------------------------------------
 
@@ -231,6 +306,12 @@ class TestNotify:
 
 class TestCron:
     @patch("src.main._run_setup_cron", return_value=0)
-    def test_cron(self, mock_fn):
+    def test_cron_print(self, mock_fn):
         result = runner.invoke(app, ["cron"])
         assert result.exit_code == 0
+
+    def test_cron_help_shows_install(self):
+        result = runner.invoke(app, ["cron", "--help"])
+        assert result.exit_code == 0
+        assert "--install" in result.output
+        assert "--uninstall" in result.output

@@ -25,13 +25,15 @@ code-daily issues list [--json] [--labels TEXT] [--repo TEXT] [--limit INT]
 code-daily issues top [--json]
 code-daily vault scan [--json] [--since INT] [--folders TEXT] [--search TEXT]
 code-daily vault ideas [--json]
+code-daily streak show [--json]
+code-daily streak history [--json] [--days INT]
 code-daily suggest [--json]
 code-daily dashboard [--json]
 code-daily check LEVEL [--dry-run] [--json]
 code-daily news digest [--json] [--sources TEXT] [--hours INT] [--limit INT] [--no-write]
 code-daily notify test
 code-daily notify status
-code-daily cron
+code-daily cron [--install] [--uninstall]
 ```
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).

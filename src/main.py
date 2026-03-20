@@ -142,26 +142,31 @@ def _run_notify_status() -> int:
     return 0
 
 
+def _get_cron_entries() -> str:
+    """Return crontab entries as a string for the escalating schedule."""
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_bin = os.path.join(project_dir, ".venv", "bin")
+
+    lines = [
+        "# code-daily notification schedule",
+        f"# Level 1: Morning gentle reminder (10 AM)",
+        f"0 10 * * * cd {project_dir} && PATH={venv_bin}:$PATH code-daily check 1",
+        f"# Level 2: Afternoon nudge (4 PM)",
+        f"0 16 * * * cd {project_dir} && PATH={venv_bin}:$PATH code-daily check 2",
+        f"# Level 3: Evening urgent (7 PM)",
+        f"0 19 * * * cd {project_dir} && PATH={venv_bin}:$PATH code-daily check 3",
+        f"# Level 4: Night critical (9 PM)",
+        f"0 21 * * * cd {project_dir} && PATH={venv_bin}:$PATH code-daily check 4",
+    ]
+    return "\n".join(lines)
+
+
 def _run_setup_cron() -> int:
     """Print crontab entries for the escalating schedule."""
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    venv_python = os.path.join(project_dir, ".venv", "bin", "python")
-
-    print("# code-daily notification schedule")
-    print("# Add these to your crontab with: crontab -e")
+    print(_get_cron_entries())
     print()
-    print(f"# Level 1: Morning gentle reminder (10 AM)")
-    print(f"0 10 * * * cd {project_dir} && {venv_python} src/main.py --check 1")
-    print()
-    print(f"# Level 2: Afternoon nudge (4 PM)")
-    print(f"0 16 * * * cd {project_dir} && {venv_python} src/main.py --check 2")
-    print()
-    print(f"# Level 3: Evening urgent (7 PM)")
-    print(f"0 19 * * * cd {project_dir} && {venv_python} src/main.py --check 3")
-    print()
-    print(f"# Level 4: Night critical (9 PM)")
-    print(f"0 21 * * * cd {project_dir} && {venv_python} src/main.py --check 4")
-
+    print("Run 'code-daily cron --install' to install these automatically,")
+    print("or copy and paste them into 'crontab -e'.")
     return 0
 
 
