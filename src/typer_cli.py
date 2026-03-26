@@ -693,6 +693,99 @@ def news_digest(
     _output(digest, json_output, _human)
 
 
+@news_app.command("trends")
+def news_trends(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    days: int = typer.Option(30, help="Days back to analyze"),
+):
+    """Identify trending topics across news digests."""
+    from src.news_trends import analyze_trends
+
+    vault_path = _get_vault_path()
+    data = analyze_trends(vault_path, days=days)
+
+    def _human(d):
+        if d["digests_analyzed"] == 0:
+            print("No digest files found in vault. Run 'code-daily news digest' first.")
+            return
+
+        print(f"Analyzed {d['digests_analyzed']} digests ({d['date_range']['from']} to {d['date_range']['to']})\n")
+
+        if d["trending"]:
+            print("Trending topics (appearing on 2+ days):\n")
+            for t in d["trending"][:15]:
+                dates_str = ", ".join(t["dates"])
+                print(f"  [{t['day_count']}d/{t['total_mentions']}x] {t['topic']}")
+                print(f"    Dates: {dates_str}")
+                if t["example_titles"]:
+                    print(f"    e.g. {t['example_titles'][0][:70]}")
+                print()
+        else:
+            print("No recurring topics found yet. Need 2+ digest days for trends.\n")
+
+        if d["new_today"]:
+            print(f"New today: {', '.join(d['new_today'][:10])}\n")
+
+        if d["fading"]:
+            print(f"Fading: {', '.join(d['fading'][:10])}")
+
+    _output(data, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# diversity command
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def diversity(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    days: int = typer.Option(14, help="Days back to analyze"),
+):
+    """Analyze how diverse your recent suggestions have been."""
+    from src.diversity import compute_diversity_score
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    data = compute_diversity_score(storage, days=days)
+
+    def _human(d):
+        score = d["score"]
+        rating = d["rating"]
+        total = d["total_suggestions"]
+
+        if rating == "no data":
+            print(d["warning"])
+            return
+
+        # Score display
+        bar_len = int(score / 5)
+        bar = "#" * bar_len + "-" * (20 - bar_len)
+        print(f"  Diversity Score: {score}/100 [{bar}] ({rating})")
+        print()
+
+        # Breakdown
+        print(f"  Suggestions analyzed: {total} (last {d['days_analyzed']} days)")
+        print(f"  Unique domains: {d['unique_domains']} ({d['domain_spread']:.0%} spread)")
+        print(f"  Sources: {', '.join(f'{k}={v}' for k, v in d['source_spread'].items())}")
+        print()
+
+        if d["most_repeated"]:
+            print("  Most repeated:")
+            for item in d["most_repeated"]:
+                print(f"    [{item['count']}x] {item['title'][:70]}")
+            print()
+
+        if d["underrepresented_domains"]:
+            print(f"  Underrepresented: {', '.join(d['underrepresented_domains'])}")
+            print()
+
+        if d["warning"]:
+            print(f"  Warning: {d['warning']}")
+
+    _output(data, json_output, _human)
+
+
 # ---------------------------------------------------------------------------
 # ideas subcommands
 # ---------------------------------------------------------------------------

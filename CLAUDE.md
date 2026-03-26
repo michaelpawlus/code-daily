@@ -28,11 +28,13 @@ code-daily vault ideas [--json]
 code-daily streak show [--json]
 code-daily streak history [--json] [--days INT]
 code-daily suggest [--json]
+code-daily diversity [--json] [--days INT]
 code-daily ideas from-news [--json] [--hours INT] [--limit INT]
 code-daily ideas from-reddit [--json] [--subreddit TEXT] [--count INT] [--limit INT]
 code-daily dashboard [--json]
 code-daily check LEVEL [--dry-run] [--json]
 code-daily news digest [--json] [--sources TEXT] [--hours INT] [--limit INT] [--no-write]
+code-daily news trends [--json] [--days INT]
 code-daily notify test
 code-daily notify status
 code-daily cron [--install] [--uninstall]
