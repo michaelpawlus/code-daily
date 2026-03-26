@@ -20,11 +20,13 @@ vault_app = typer.Typer(help="Obsidian vault commands")
 notify_app = typer.Typer(help="Notification commands")
 news_app = typer.Typer(help="AI news commands")
 streak_app = typer.Typer(help="Streak tracking commands")
+ideas_app = typer.Typer(help="Project idea generation commands")
 app.add_typer(issues_app, name="issues")
 app.add_typer(vault_app, name="vault")
 app.add_typer(notify_app, name="notify")
 app.add_typer(news_app, name="news")
 app.add_typer(streak_app, name="streak")
+app.add_typer(ideas_app, name="ideas")
 
 
 def _output(data, as_json: bool, human_fn=None):
@@ -303,8 +305,14 @@ def suggest(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Suggest the best thing to work on next, combining all sources."""
+    import hashlib
+
     from src.gh_issues import get_assigned_issues, prioritize_issues
     from src.obsidian_scanner import scan_vault
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    recent_domains = storage.get_recent_suggestion_domains(days=30)
 
     candidates: list[dict] = []
 
@@ -315,13 +323,13 @@ def suggest(
         for r in ranked:
             iss = r["issue"]
             score = r["score"]
-            # Bugs get extra weight
             candidates.append({
                 "source": "github",
                 "title": f"#{iss.number} {iss.title}",
                 "url": iss.url,
                 "score": score,
                 "reason": _issue_reason(iss, score),
+                "domain": iss.repo if hasattr(iss, "repo") else None,
             })
     except Exception:
         pass
@@ -333,12 +341,14 @@ def suggest(
             items = scan_vault(vault_path, since=3)
             for item in items:
                 score = _score_obsidian_item(item)
+                domain = item.context.lower() if item.context else None
                 candidates.append({
                     "source": "obsidian",
                     "title": item.content,
                     "url": item.source_file,
                     "score": score,
                     "reason": _obsidian_reason(item, score),
+                    "domain": domain,
                 })
         except Exception:
             pass
@@ -349,8 +359,35 @@ def suggest(
         for c in candidates:
             c["score"] += 3
 
+    # Freshness: penalize recently-suggested ideas, reward domain diversity
+    for c in candidates:
+        content_hash = hashlib.sha256(
+            c["title"].strip().lower().encode()
+        ).hexdigest()[:16]
+        c["_content_hash"] = content_hash
+
+        freq = storage.get_suggestion_frequency(content_hash, days=14)
+        if freq > 0:
+            c["score"] -= 3 * freq
+
+        domain = c.get("domain")
+        if domain and domain not in recent_domains:
+            c["score"] += 3
+
     candidates.sort(key=lambda c: c["score"], reverse=True)
     top = candidates[:5]
+
+    # Log suggestions for future freshness tracking
+    for c in top:
+        try:
+            storage.log_suggestion(c["source"], c["title"], c.get("domain"))
+        except Exception:
+            pass
+
+    # Clean internal fields before output
+    for c in top:
+        c.pop("_content_hash", None)
+        c.pop("domain", None)
 
     def _human(d):
         if not d:
@@ -654,6 +691,69 @@ def news_digest(
             print(f"Written to vault: {d['vault_file']}")
 
     _output(digest, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# ideas subcommands
+# ---------------------------------------------------------------------------
+
+
+@ideas_app.command("from-news")
+def ideas_from_news(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    hours: int = typer.Option(24, help="Hours back for news fetch"),
+    limit: int = typer.Option(25, help="Max items per news source"),
+):
+    """Collect seed data for news-informed project ideas (agent synthesizes)."""
+    from src.idea_generator import collect_idea_seeds
+
+    seeds = collect_idea_seeds(hours_back=hours, limit=limit)
+
+    def _human(d):
+        print(f"Idea seeds collected at {d['collected_at']}\n")
+        print(f"  Trending topics: {d['trending_count']}")
+        print(f"  User interests: {len(d['user_interests'])}")
+        print(f"  Recent domains: {len(d['recent_domains'])}")
+        print()
+        print("Top trending:")
+        for item in d["trending_topics"][:5]:
+            score = item.get("score", 0)
+            print(f"  [{score}] {item.get('title', '')}")
+        print()
+        print("Run with --json for full data for agent synthesis.")
+
+    _output(seeds, json_output, _human)
+
+
+@ideas_app.command("from-reddit")
+def ideas_from_reddit(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    subreddit: Optional[str] = typer.Option(None, help="Specific subreddit to scan"),
+    count: int = typer.Option(3, help="Number of random subreddits to pick"),
+    limit: int = typer.Option(50, help="Max posts per subreddit"),
+):
+    """Scan community subreddits for recurring problems (agent synthesizes)."""
+    from src.reddit_scanner import scan_subreddit_problems
+
+    subs = [subreddit] if subreddit else None
+    scan = scan_subreddit_problems(subreddits=subs, count=count, limit=limit)
+
+    def _human(d):
+        print(f"Reddit scan at {d['collected_at']}\n")
+        print(f"  Subreddits: {', '.join(d['subreddits_scanned'])}")
+        print(f"  Total posts: {d['total_count']}")
+        print(f"  Problem signals: {d['problem_count']}")
+        if d["errors"]:
+            print(f"  Errors: {'; '.join(d['errors'])}")
+        print()
+        if d["problem_posts"]:
+            print("Top problem posts:")
+            for post in d["problem_posts"][:5]:
+                print(f"  [{post['score']}] r/{post['subreddit'].lstrip('r/')} - {post['title'][:80]}")
+        print()
+        print("Run with --json for full data for agent synthesis.")
+
+    _output(scan, json_output, _human)
 
 
 # ---------------------------------------------------------------------------

@@ -463,3 +463,43 @@ class TestEdgeCases:
 
             assert custom_path.exists()
             assert len(storage.get_all_commits()) == 1
+
+
+class TestSuggestionLog:
+    """Tests for the suggestion_log feature."""
+
+    def test_log_suggestion(self, storage):
+        entry_id = storage.log_suggestion("github", "Fix the auth bug", "auth")
+        assert entry_id is not None
+        assert entry_id > 0
+
+    def test_get_recent_suggestions(self, storage):
+        storage.log_suggestion("github", "Fix bug", "bugs")
+        storage.log_suggestion("obsidian", "Build CLI tool", "cli")
+
+        recent = storage.get_recent_suggestions(days=14)
+        assert len(recent) == 2
+
+    def test_get_suggestion_frequency(self, storage):
+        import hashlib
+
+        title = "Fix the auth bug"
+        content_hash = hashlib.sha256(title.strip().lower().encode()).hexdigest()[:16]
+
+        storage.log_suggestion("github", title, "auth")
+        storage.log_suggestion("github", title, "auth")
+
+        freq = storage.get_suggestion_frequency(content_hash, days=14)
+        assert freq == 2
+
+    def test_get_suggestion_frequency_zero(self, storage):
+        freq = storage.get_suggestion_frequency("nonexistent", days=14)
+        assert freq == 0
+
+    def test_get_recent_suggestion_domains(self, storage):
+        storage.log_suggestion("github", "Fix bug", "auth")
+        storage.log_suggestion("obsidian", "Build tool", "cli")
+        storage.log_suggestion("obsidian", "Another idea", None)
+
+        domains = storage.get_recent_suggestion_domains(days=30)
+        assert set(domains) == {"auth", "cli"}

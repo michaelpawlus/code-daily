@@ -28,6 +28,8 @@ code-daily vault ideas [--json]
 code-daily streak show [--json]
 code-daily streak history [--json] [--days INT]
 code-daily suggest [--json]
+code-daily ideas from-news [--json] [--hours INT] [--limit INT]
+code-daily ideas from-reddit [--json] [--subreddit TEXT] [--count INT] [--limit INT]
 code-daily dashboard [--json]
 code-daily check LEVEL [--dry-run] [--json]
 code-daily news digest [--json] [--sources TEXT] [--hours INT] [--limit INT] [--no-write]
@@ -63,3 +65,62 @@ The synthesized digest structure expected by the vault writer:
     ]
 }
 ```
+
+## Agent Workflow: News-Informed Project Ideas
+
+Generate project ideas tied to trending topics. The workflow:
+
+1. Run `code-daily ideas from-news --json` to collect seed data (trending topics + user interests + recent domains)
+2. Claude Code synthesizes 3 project ideas in-session, each with: title, description, why_now, skills_demonstrated, complexity
+3. Write to vault using `write_project_ideas_to_vault()` from `src/idea_generator`
+
+The synthesized ideas structure expected by the vault writer:
+```python
+{
+    "ideas": [
+        {
+            "title": "Project Name",
+            "description": "What to build",
+            "why_now": "Tied to trending topic X",
+            "skills_demonstrated": ["skill1", "skill2"],
+            "trending_source": "HN/Reddit item that inspired it",
+            "complexity": "weekend"  # or "week", "multi-week"
+        }
+    ],
+    "generated_from": "2026-03-25"
+}
+```
+
+## Agent Workflow: Reddit Community Problem Scanner
+
+Find real pain points in active communities and suggest projects. The workflow:
+
+1. Run `code-daily ideas from-reddit --json` to scan random community subreddits for problem posts
+2. Claude Code identifies recurring pain points and synthesizes a project idea
+3. Write to vault using `write_reddit_scan_to_vault()` from `src/reddit_scanner`
+
+The synthesized scan structure expected by the vault writer:
+```python
+{
+    "subreddit": "homelab",
+    "problem_summary": "What users are struggling with",
+    "evidence_posts": [
+        {"title": "...", "url": "...", "comment_count": 32}
+    ],
+    "project_idea": {
+        "title": "Project Name",
+        "description": "What to build",
+        "why_build_it": "Why this solves a real problem",
+        "target_users": "Who benefits",
+        "skills_demonstrated": ["skill1", "skill2"]
+    }
+}
+```
+
+## Suggest Command: Freshness Tracking
+
+The `suggest` command tracks previously suggested ideas in a `suggestion_log` table. Scoring adjustments:
+- **Staleness penalty:** -3 points per time an idea was suggested in the last 14 days
+- **Domain diversity bonus:** +3 points if the idea's domain hasn't been suggested in the last 30 days
+
+This prevents the same ideas from dominating the suggestions list day after day.

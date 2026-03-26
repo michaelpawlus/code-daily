@@ -196,6 +196,22 @@ class CommitStorage:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_notification_log_date ON notification_log(date)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS suggestion_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                suggested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                source TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                domain TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_suggestion_log_hash ON suggestion_log(content_hash)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_suggestion_log_date ON suggestion_log(suggested_at)
+        """)
         self._commit_and_sync(conn)
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -790,6 +806,62 @@ class CommitStorage:
             (limit,),
         )
         return self._fetchall_as_dicts(cursor)
+
+    # Suggestion log methods
+    def log_suggestion(self, source: str, title: str, domain: str | None = None) -> int:
+        """Log that an idea was suggested. Returns log entry ID."""
+        import hashlib
+
+        content_hash = hashlib.sha256(title.strip().lower().encode()).hexdigest()[:16]
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            INSERT INTO suggestion_log (source, title, content_hash, domain)
+            VALUES (?, ?, ?, ?)
+            """,
+            (source, title, content_hash, domain),
+        )
+        self._commit_and_sync(conn)
+        return cursor.lastrowid
+
+    def get_recent_suggestions(self, days: int = 14) -> list[dict]:
+        """Get suggestions from the last N days."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            SELECT * FROM suggestion_log
+            WHERE suggested_at >= datetime('now', '-' || ? || ' days')
+            ORDER BY suggested_at DESC
+            """,
+            (days,),
+        )
+        return self._fetchall_as_dicts(cursor)
+
+    def get_suggestion_frequency(self, content_hash: str, days: int = 14) -> int:
+        """How many times has this exact idea been suggested in the last N days?"""
+        conn = self._get_connection()
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM suggestion_log
+            WHERE content_hash = ?
+            AND suggested_at >= datetime('now', '-' || ? || ' days')
+            """,
+            (content_hash, days),
+        ).fetchone()
+        return row[0] if row else 0
+
+    def get_recent_suggestion_domains(self, days: int = 30) -> list[str]:
+        """Get domains that have been suggested recently, for diversity scoring."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            """
+            SELECT DISTINCT domain FROM suggestion_log
+            WHERE domain IS NOT NULL
+            AND suggested_at >= datetime('now', '-' || ? || ' days')
+            """,
+            (days,),
+        ).fetchall()
+        return [row[0] for row in rows]
 
     # External cache methods
     def get_cache(self, cache_key: str) -> str | None:
