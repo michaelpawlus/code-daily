@@ -148,6 +148,9 @@ def _get_cron_entries() -> str:
     venv_bin = os.path.join(project_dir, ".venv", "bin")
 
     lines = [
+        "# code-daily news digest (8 AM, last 24h)",
+        f"0 8 * * * cd {project_dir} && PATH={venv_bin}:$PATH code-daily news digest",
+        "",
         "# code-daily notification schedule",
         f"# Level 1: Morning gentle reminder (10 AM)",
         f"0 10 * * * cd {project_dir} && PATH={venv_bin}:$PATH code-daily check 1",
