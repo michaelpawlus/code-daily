@@ -732,6 +732,48 @@ def news_trends(
     _output(data, json_output, _human)
 
 
+@news_app.command("podcast")
+def news_podcast(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    date_str: Optional[str] = typer.Option(None, "--date", help="Digest date (YYYY-MM-DD, default today)"),
+    voice: str = typer.Option("en-US-AndrewMultilingualNeural", "--voice", help="edge-tts voice name"),
+):
+    """Generate a TTS podcast from the synthesized news digest."""
+    from datetime import date
+
+    from src.tts import (
+        DEFAULT_VOICE,
+        digest_to_script,
+        read_synthesis_from_vault,
+        write_podcast_to_vault,
+    )
+
+    vault_path = _get_vault_path()
+    target_date = date_str or date.today().isoformat()
+
+    try:
+        synthesis = read_synthesis_from_vault(vault_path, target_date)
+    except FileNotFoundError:
+        print(f"No synthesized digest found for {target_date}.", file=sys.stderr)
+        raise typer.Exit(1)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    script = digest_to_script(synthesis, target_date)
+    result = write_podcast_to_vault(vault_path, target_date, script, voice)
+    result["script"] = script
+
+    def _human(d):
+        print(f"Podcast generated for {d['date']}\n")
+        print(f"  Voice: {d['voice']}")
+        print(f"  Script: {d['script_length']:,} characters")
+        print(f"  File: {d['vault_file']}")
+        print(f"\n  Play in Obsidian or any audio player.")
+
+    _output(result, json_output, _human)
+
+
 # ---------------------------------------------------------------------------
 # diversity command
 # ---------------------------------------------------------------------------

@@ -35,6 +35,7 @@ code-daily dashboard [--json]
 code-daily check LEVEL [--dry-run] [--json]
 code-daily news digest [--json] [--sources TEXT] [--hours INT] [--limit INT] [--no-write]
 code-daily news trends [--json] [--days INT]
+code-daily news podcast [--json] [--date TEXT] [--voice TEXT]
 code-daily notify test
 code-daily notify status
 code-daily cron [--install] [--uninstall]
@@ -50,6 +51,7 @@ The `news digest` command collects raw items. Synthesis into a themed, curated d
 2. Load user context from vault: `code-daily vault ideas --json`
 3. Synthesize in-session: curate items into themed sections (Industry & Labs, Tools & Workflows, Research, Relevant to You, Challenge Your Thinking)
 4. Write the themed digest to the vault using `write_synthesized_digest_to_vault()` from `src/news_digest`
+5. Generate TTS podcast: `code-daily news podcast --json` (reads today's synthesized digest, outputs MP3)
 
 The synthesized digest structure expected by the vault writer:
 ```python
@@ -67,6 +69,21 @@ The synthesized digest structure expected by the vault writer:
     ]
 }
 ```
+
+## Agent Workflow: TTS Podcast Generation
+
+After synthesizing the themed news digest, generate a podcast audio file:
+
+1. Run `code-daily news podcast --json` (reads today's synthesized digest from vault)
+2. Or specify a date: `code-daily news podcast --json --date 2026-03-28`
+3. Returns metadata including the vault file path and generated script
+
+The command reads the synthesized digest from `ai-news/{date}.md`, converts it to a
+natural speech script, and generates an MP3 at `ai-news/podcasts/{date}.mp3` using
+edge-tts (Microsoft TTS, no API key required).
+
+Available voices: `edge-tts --list-voices`
+Default voice: `en-US-AndrewMultilingualNeural`
 
 ## Agent Workflow: News-Informed Project Ideas
 
