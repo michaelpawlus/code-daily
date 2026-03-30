@@ -192,6 +192,117 @@ def write_synthesized_digest_to_vault(vault_path: str, digest: dict, synthesis: 
     return rel_path
 
 
+def read_digest_from_vault(vault_path: str, digest_date: str | None = None) -> dict | None:
+    """Read and parse a synthesized digest from the Obsidian vault.
+
+    Args:
+        vault_path: Path to the Obsidian vault root.
+        digest_date: ISO date string (e.g. "2026-03-29"). Defaults to today.
+
+    Returns:
+        Parsed digest dict with overview, sections, and metadata, or None if not found.
+    """
+    import re
+
+    if digest_date is None:
+        digest_date = date.today().isoformat()
+
+    file_path = os.path.join(vault_path, "ai-news", f"{digest_date}.md")
+    if not os.path.exists(file_path):
+        return None
+
+    with open(file_path) as f:
+        content = f.read()
+
+    # Parse frontmatter
+    frontmatter: dict = {}
+    body = content
+    fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
+    if fm_match:
+        for line in fm_match.group(1).splitlines():
+            if ": " in line:
+                key, val = line.split(": ", 1)
+                frontmatter[key.strip()] = val.strip()
+        body = content[fm_match.end():]
+
+    # Check if this is a synthesized digest (has Overview section)
+    is_synthesized = "synthesized" in frontmatter.get("tags", "")
+
+    # Parse sections
+    sections: list[dict] = []
+    overview = ""
+
+    # Split by ## headings
+    section_splits = re.split(r"^## (.+)$", body, flags=re.MULTILINE)
+    # section_splits: [preamble, heading1, body1, heading2, body2, ...]
+
+    for i in range(1, len(section_splits), 2):
+        heading = section_splits[i].strip()
+        section_body = section_splits[i + 1].strip() if i + 1 < len(section_splits) else ""
+
+        if heading == "Overview":
+            overview = section_body
+            continue
+
+        # Parse items from bullet list
+        items: list[dict] = []
+        summary_lines: list[str] = []
+        for line in section_body.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # Match: - [title](url) (Source, Npts) — commentary
+            item_match = re.match(
+                r"^- \[(.+?)\]\((.+?)\)\s*(?:\(([^)]*)\))?\s*(?:—\s*(.+))?$",
+                line,
+            )
+            if item_match:
+                title, url, meta, commentary = item_match.groups()
+                source = ""
+                score = 0
+                if meta:
+                    meta_parts = [p.strip() for p in meta.split(",")]
+                    for part in meta_parts:
+                        if part.endswith("pts"):
+                            try:
+                                score = int(part.replace("pts", ""))
+                            except ValueError:
+                                pass
+                        else:
+                            source = part
+                items.append({
+                    "title": title,
+                    "url": url,
+                    "source": source,
+                    "score": score,
+                    "commentary": commentary or "",
+                })
+            elif not line.startswith("- ") and not line.startswith("|"):
+                summary_lines.append(line)
+
+        sections.append({
+            "name": heading,
+            "summary": " ".join(summary_lines),
+            "items": items,
+            "item_count": len(items),
+        })
+
+    # Check for podcast
+    podcast_path = os.path.join(vault_path, "ai-news", "podcasts", f"{digest_date}.mp3")
+    has_podcast = os.path.exists(podcast_path)
+
+    return {
+        "date": digest_date,
+        "overview": overview,
+        "sections": sections,
+        "is_synthesized": is_synthesized,
+        "has_podcast": has_podcast,
+        "podcast_path": f"ai-news/podcasts/{digest_date}.mp3" if has_podcast else None,
+        "total_items": sum(s["item_count"] for s in sections),
+        "frontmatter": frontmatter,
+    }
+
+
 def _escape_pipe(text: str) -> str:
     """Escape pipe characters for markdown tables."""
     return text.replace("|", "\\|")

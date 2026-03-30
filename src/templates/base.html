@@ -588,6 +588,37 @@
             }
         }
 
+        // News digest functions
+        function toggleNewsSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            const index = sectionId.replace('news-section-', '');
+            const chevron = document.getElementById('news-chevron-' + index);
+
+            if (section.classList.contains('hidden')) {
+                section.classList.remove('hidden');
+                chevron.style.transform = 'rotate(90deg)';
+            } else {
+                section.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function togglePodcast() {
+            const player = document.getElementById('podcast-player');
+            const btnText = document.getElementById('podcast-btn-text');
+
+            if (player.classList.contains('hidden')) {
+                player.classList.remove('hidden');
+                btnText.textContent = 'Hide';
+            } else {
+                player.classList.add('hidden');
+                btnText.textContent = 'Podcast';
+                // Pause audio when hiding
+                const audio = player.querySelector('audio');
+                if (audio) audio.pause();
+            }
+        }
+
         // Close skip modal when clicking outside
         document.addEventListener('click', function(event) {
             const modal = document.getElementById('skip-modal');

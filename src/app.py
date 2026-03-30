@@ -4,10 +4,11 @@ FastAPI web application for code-daily.
 Provides REST API endpoints for streak and stats data.
 """
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,7 @@ from src.achievements import check_achievements, get_all_achievements_status
 from src.quest_manager import QuestManager
 from src.ideas import read_ideas, add_idea, sync_ideas_to_db
 from src.todo_scanner import scan_directory
+from src.news_digest import read_digest_from_vault
 
 app = FastAPI(
     title="code-daily",
@@ -186,6 +188,13 @@ def index(request: Request):
 
     # Add ideas data
     data["ideas"] = storage.get_ideas(status="active")
+
+    # Add news digest data
+    vault_path = os.environ.get("OBSIDIAN_VAULT_PATH", "")
+    if vault_path:
+        data["news_digest"] = read_digest_from_vault(vault_path)
+    else:
+        data["news_digest"] = None
 
     return templates.TemplateResponse(request, "index.html", data)
 
@@ -702,3 +711,48 @@ def trigger_notification_check(request: NotificationCheckRequest):
     storage = CommitStorage()
     manager = NotificationManager(storage)
     return manager.check_and_notify(level=request.level)
+
+
+# News digest API endpoints
+@app.get("/api/news/digest")
+def get_news_digest(date: str | None = None):
+    """
+    Get today's (or a specific date's) synthesized news digest.
+
+    Args:
+        date: Optional ISO date string (e.g. "2026-03-29"). Defaults to today.
+
+    Returns:
+        JSON with parsed digest sections, overview, and podcast availability
+    """
+    vault_path = os.environ.get("OBSIDIAN_VAULT_PATH", "")
+    if not vault_path:
+        raise HTTPException(status_code=500, detail="OBSIDIAN_VAULT_PATH not configured")
+
+    digest = read_digest_from_vault(vault_path, digest_date=date)
+    if not digest:
+        raise HTTPException(status_code=404, detail=f"No digest found for {date or 'today'}")
+
+    return digest
+
+
+@app.get("/api/news/podcast/{podcast_date}")
+def get_podcast(podcast_date: str):
+    """
+    Serve a podcast MP3 file from the vault.
+
+    Args:
+        podcast_date: ISO date string (e.g. "2026-03-29")
+
+    Returns:
+        MP3 file response
+    """
+    vault_path = os.environ.get("OBSIDIAN_VAULT_PATH", "")
+    if not vault_path:
+        raise HTTPException(status_code=500, detail="OBSIDIAN_VAULT_PATH not configured")
+
+    mp3_path = os.path.join(vault_path, "ai-news", "podcasts", f"{podcast_date}.mp3")
+    if not os.path.exists(mp3_path):
+        raise HTTPException(status_code=404, detail=f"No podcast found for {podcast_date}")
+
+    return FileResponse(mp3_path, media_type="audio/mpeg", filename=f"ai-news-{podcast_date}.mp3")

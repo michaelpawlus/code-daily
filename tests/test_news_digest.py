@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 import pytest
 
-from src.news_digest import collect_news, write_digest_to_vault, write_synthesized_digest_to_vault
+from src.news_digest import (
+    collect_news,
+    read_digest_from_vault,
+    write_digest_to_vault,
+    write_synthesized_digest_to_vault,
+)
 from src.news_fetchers import FetchResult, NewsItem
 
 
@@ -199,3 +204,83 @@ def test_write_synthesized_digest_to_vault(tmp_path):
     assert "Major release." in content
     assert "## Challenge Your Thinking" in content
     assert "[AI Skeptic View](https://example.com/2)" in content
+
+
+# ---------------------------------------------------------------------------
+# read_digest_from_vault
+# ---------------------------------------------------------------------------
+
+
+def test_read_digest_not_found(tmp_path):
+    result = read_digest_from_vault(str(tmp_path), "2026-01-01")
+    assert result is None
+
+
+def test_read_synthesized_digest(tmp_path):
+    """Write a synthesized digest and read it back."""
+    digest = {
+        "date": "2026-03-20",
+        "sources": {"hackernews": {"count": 1, "success": True, "error": ""}},
+        "total_count": 2,
+    }
+    synthesis = {
+        "overview": "A busy day for AI tooling.",
+        "sections": [
+            {
+                "name": "Tools & Workflows",
+                "slug": "tools-workflows",
+                "summary": "New tools dropped.",
+                "items": [
+                    {
+                        "title": "Cool Tool",
+                        "url": "https://example.com/tool",
+                        "source": "Hackernews",
+                        "score": 75,
+                        "commentary": "Worth trying.",
+                    },
+                    {
+                        "title": "Another Tool",
+                        "url": "https://example.com/tool2",
+                        "source": "Reddit",
+                        "score": 30,
+                        "commentary": "",
+                    },
+                ],
+            },
+        ],
+    }
+    write_synthesized_digest_to_vault(str(tmp_path), digest, synthesis)
+
+    result = read_digest_from_vault(str(tmp_path), "2026-03-20")
+    assert result is not None
+    assert result["date"] == "2026-03-20"
+    assert result["is_synthesized"] is True
+    assert "A busy day" in result["overview"]
+    assert len(result["sections"]) == 1
+    assert result["sections"][0]["name"] == "Tools & Workflows"
+    assert result["sections"][0]["item_count"] == 2
+    assert result["sections"][0]["items"][0]["title"] == "Cool Tool"
+    assert result["sections"][0]["items"][0]["score"] == 75
+    assert result["sections"][0]["items"][0]["commentary"] == "Worth trying."
+    assert result["total_items"] == 2
+    assert result["has_podcast"] is False
+
+
+def test_read_digest_detects_podcast(tmp_path):
+    """Podcast detection works when MP3 exists."""
+    digest = {
+        "date": "2026-03-20",
+        "sources": {"hackernews": {"count": 0, "success": True, "error": ""}},
+        "total_count": 0,
+    }
+    synthesis = {"overview": "Empty day.", "sections": []}
+    write_synthesized_digest_to_vault(str(tmp_path), digest, synthesis)
+
+    # Create podcast file
+    podcast_dir = tmp_path / "ai-news" / "podcasts"
+    podcast_dir.mkdir(parents=True, exist_ok=True)
+    (podcast_dir / "2026-03-20.mp3").write_bytes(b"fake mp3")
+
+    result = read_digest_from_vault(str(tmp_path), "2026-03-20")
+    assert result["has_podcast"] is True
+    assert result["podcast_path"] == "ai-news/podcasts/2026-03-20.mp3"

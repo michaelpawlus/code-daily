@@ -430,6 +430,95 @@
         </div>
     </div>
 
+    <!-- News Digest -->
+    {% if news_digest %}
+    <section class="card rounded-xl p-6 mb-6" data-news-digest>
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+                <svg class="w-5 h-5" style="color: var(--accent-streak);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+                </svg>
+                <h2 class="text-lg font-semibold" style="color: var(--text-primary);">Today's News</h2>
+                <span class="text-xs px-2 py-0.5 rounded" style="background-color: var(--bg-secondary); color: var(--text-muted);">
+                    {{ news_digest.date }}
+                </span>
+            </div>
+            <div class="flex items-center gap-2">
+                {% if news_digest.has_podcast %}
+                <button onclick="togglePodcast()" class="text-sm px-3 py-1 rounded transition-opacity hover:opacity-90 flex items-center gap-1"
+                        style="background-color: var(--accent-streak); color: white;" id="podcast-btn">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+                    </svg>
+                    <span id="podcast-btn-text">Podcast</span>
+                </button>
+                {% endif %}
+                <span class="text-sm" style="color: var(--text-muted);">
+                    {{ news_digest.total_items }} items
+                </span>
+            </div>
+        </div>
+
+        {% if news_digest.has_podcast %}
+        <div id="podcast-player" class="hidden mb-4 p-3 rounded-lg" style="background-color: var(--bg-secondary);">
+            <audio controls class="w-full" style="height: 36px;">
+                <source src="/api/news/podcast/{{ news_digest.date }}" type="audio/mpeg">
+            </audio>
+        </div>
+        {% endif %}
+
+        <!-- Overview -->
+        {% if news_digest.overview %}
+        <p class="text-sm mb-4" style="color: var(--text-secondary); line-height: 1.6;">
+            {{ news_digest.overview }}
+        </p>
+        {% endif %}
+
+        <!-- Sections -->
+        <div class="space-y-2">
+            {% for section in news_digest.sections %}
+            <div class="rounded-lg overflow-hidden" style="border: 1px solid var(--border-card);">
+                <button onclick="toggleNewsSection('news-section-{{ loop.index }}')"
+                        class="w-full flex items-center justify-between p-3 text-left transition-colors hover:opacity-90"
+                        style="background-color: var(--bg-secondary);">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 transition-transform" id="news-chevron-{{ loop.index }}" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                        <span class="text-sm font-medium" style="color: var(--text-primary);">{{ section.name }}</span>
+                    </div>
+                    <span class="text-xs" style="color: var(--text-muted);">{{ section.item_count }} items</span>
+                </button>
+                <div id="news-section-{{ loop.index }}" class="hidden">
+                    {% if section.summary %}
+                    <p class="text-xs px-3 pt-2" style="color: var(--text-muted);">{{ section.summary }}</p>
+                    {% endif %}
+                    <div class="p-3 space-y-2">
+                        {% for item in section['items'] %}
+                        <div class="flex items-start gap-2 text-sm">
+                            <span class="shrink-0 text-xs font-mono mt-0.5 px-1 rounded"
+                                  style="background-color: var(--bg-secondary); color: var(--text-muted);">
+                                {% if item.score %}{{ item.score }}{% else %}-{% endif %}
+                            </span>
+                            <div class="min-w-0">
+                                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+                                   class="hover:underline" style="color: var(--accent-streak);">
+                                    {{ item.title }}
+                                </a>
+                                {% if item.commentary %}
+                                <span style="color: var(--text-muted);"> — {{ item.commentary }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <!-- Stats Grid -->
     <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div class="card stat-card rounded-xl p-4 text-center">
