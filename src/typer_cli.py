@@ -21,12 +21,16 @@ notify_app = typer.Typer(help="Notification commands")
 news_app = typer.Typer(help="AI news commands")
 streak_app = typer.Typer(help="Streak tracking commands")
 ideas_app = typer.Typer(help="Project idea generation commands")
+quests_app = typer.Typer(help="Quest management commands")
+achievements_app = typer.Typer(help="Achievement tracking commands")
 app.add_typer(issues_app, name="issues")
 app.add_typer(vault_app, name="vault")
 app.add_typer(notify_app, name="notify")
 app.add_typer(news_app, name="news")
 app.add_typer(streak_app, name="streak")
 app.add_typer(ideas_app, name="ideas")
+app.add_typer(quests_app, name="quests")
+app.add_typer(achievements_app, name="achievements")
 
 
 def _output(data, as_json: bool, human_fn=None):
@@ -889,6 +893,588 @@ def ideas_from_reddit(
         print("Run with --json for full data for agent synthesis.")
 
     _output(scan, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# quests subcommands
+# ---------------------------------------------------------------------------
+
+
+def _quest_not_found(quest_id: int, json_output: bool):
+    """Handle quest-not-found with proper exit code and output."""
+    if json_output:
+        print(json.dumps({"error": "Quest not found", "code": 2}))
+    else:
+        print(f"Quest {quest_id} not found.", file=sys.stderr)
+    raise typer.Exit(2)
+
+
+@quests_app.command("list")
+def quests_list(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    status: Optional[str] = typer.Option(None, help="Filter by status (pending, active, completed, skipped, archived)"),
+    limit: int = typer.Option(10, help="Max quests to return"),
+):
+    """List quests, optionally filtered by status."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+
+    if status:
+        quests = storage.get_quests(status=status, limit=limit)
+        if json_output:
+            print(json.dumps(quests, indent=2, default=str))
+        else:
+            if not quests:
+                print(f"No {status} quests found.")
+                return
+            print(f"{status.capitalize()} quests ({len(quests)}):\n")
+            for i, q in enumerate(quests, 1):
+                score_str = f"[{q.get('priority_score', 0)}pts] " if q.get("priority_score") else ""
+                source_str = f"  [{q.get('source', '')}]" if q.get("source") else ""
+                print(f"  {i}. {score_str}#{q['id']}  {q['title']}{source_str}")
+    else:
+        pending = qm.get_prioritized_quests(limit=limit)
+        active = qm.get_active_quests()
+        summary = qm.get_quest_summary()
+
+        data = {"pending": pending, "active": active, "summary": summary}
+
+        def _human(d):
+            print("Quest Board\n")
+            if d["active"]:
+                print(f"  Active ({len(d['active'])}):")
+                for q in d["active"]:
+                    source_str = f"  [{q.get('source', '')}]" if q.get("source") else ""
+                    print(f"    #{q['id']}  {q['title']}{source_str}")
+                print()
+
+            if d["pending"]:
+                print(f"  Pending (top {len(d['pending'])} by priority):")
+                for i, q in enumerate(d["pending"], 1):
+                    score = q.get("priority_score", 0)
+                    source_str = f"  [{q.get('source', '')}]" if q.get("source") else ""
+                    print(f"    {i}. [{score}pts] #{q['id']}  {q['title']}{source_str}")
+                print()
+
+            s = d["summary"]
+            print(f"  Summary: {s['total']} total | {s['pending']} pending | {s['active']} active | {s['completed']} completed")
+
+        _output(data, json_output, _human)
+
+
+@quests_app.command("add")
+def quests_add(
+    title: str = typer.Argument(..., help="Quest title"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    description: Optional[str] = typer.Option(None, "--description", "-d", help="Optional description"),
+):
+    """Create a new manual quest."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    quest = qm.add_manual_quest(title, description)
+
+    data = {"quest": quest}
+
+    def _human(d):
+        q = d["quest"]
+        print("Quest created:")
+        print(f"  #{q['id']}  {q['title']}")
+        if q.get("description"):
+            print(f"  Description: {q['description']}")
+        print(f"  Status: {q['status']}")
+
+    _output(data, json_output, _human)
+
+
+@quests_app.command("accept")
+def quests_accept(
+    quest_id: int = typer.Argument(..., help="Quest ID to accept"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Accept a quest (mark as active)."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    quest = qm.accept_quest(quest_id)
+
+    if not quest:
+        _quest_not_found(quest_id, json_output)
+
+    data = {"quest": quest}
+
+    def _human(d):
+        q = d["quest"]
+        print(f"Quest #{q['id']} accepted:")
+        print(f"  {q['title']}")
+        print(f"  Status: {q['status']}")
+
+    _output(data, json_output, _human)
+
+
+@quests_app.command("complete")
+def quests_complete(
+    quest_id: int = typer.Argument(..., help="Quest ID to complete"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Complete a quest."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    quest = qm.complete_quest(quest_id)
+
+    if not quest:
+        _quest_not_found(quest_id, json_output)
+
+    data = {"quest": quest}
+
+    def _human(d):
+        q = d["quest"]
+        print(f"Quest #{q['id']} completed!")
+        print(f"  {q['title']}")
+
+    _output(data, json_output, _human)
+
+
+@quests_app.command("skip")
+def quests_skip(
+    quest_id: int = typer.Argument(..., help="Quest ID to skip"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    save_idea: bool = typer.Option(False, "--save-idea", help="Save quest as idea before skipping"),
+):
+    """Skip a quest, optionally saving it as an idea."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    result = qm.skip_quest(quest_id, action="archive", save_as_idea=save_idea)
+
+    if not result.get("success"):
+        _quest_not_found(quest_id, json_output)
+
+    def _human(d):
+        q = d["quest"]
+        print(f"Quest #{q['id']} skipped (archived):")
+        print(f"  {q['title']}")
+        if d.get("idea"):
+            print(f"  Saved as idea #{d['idea']['id']}")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("summary")
+def quests_summary(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show quest counts by status."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    data = qm.get_quest_summary()
+
+    def _human(d):
+        print("Quest Summary:")
+        print(f"  Total:     {d['total']}")
+        print(f"  Pending:   {d['pending']}")
+        print(f"  Active:    {d['active']}")
+        print(f"  Completed: {d['completed']}")
+        print(f"  Skipped:   {d['skipped']}")
+        print(f"  Archived:  {d['archived']}")
+
+    _output(data, json_output, _human)
+
+
+@quests_app.command("sync-issues")
+def quests_sync_issues(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Sync GitHub issues assigned to you as quests."""
+    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
+    from src.github_client import GitHubClient, GitHubClientError
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    try:
+        validate_config()
+    except ValueError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+
+    try:
+        issues = client.get_assigned_issues(state="open", per_page=50)
+    except GitHubClientError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    result = qm.sync_github_issues(issues)
+
+    def _human(d):
+        print("GitHub issue sync complete:")
+        print(f"  Added: {d['added']} new quests")
+        print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("scan-todos")
+def quests_scan_todos(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Scan project for TODO/FIXME comments and create quests."""
+    from pathlib import Path
+
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+    from src.todo_scanner import scan_directory
+
+    project_root = Path(__file__).parent.parent
+    todos = scan_directory(project_root)
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    result = qm.sync_todo_comments(todos)
+
+    def _human(d):
+        if d["added"] == 0 and d["skipped"] == 0:
+            print("TODO scan complete: No new TODOs found.")
+        else:
+            print("TODO scan complete:")
+            print(f"  Added: {d['added']} new quests")
+            print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("discover")
+def quests_discover(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Discover external contribution opportunities from starred repos."""
+    import json as json_mod
+
+    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
+    from src.github_client import GitHubClient, GitHubClientError
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    try:
+        validate_config()
+    except ValueError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+
+    cache_key = "external_issues"
+    cached_data = storage.get_cache(cache_key)
+
+    if cached_data:
+        issues = json_mod.loads(cached_data)
+        result = qm.sync_external_issues(issues)
+        result["from_cache"] = True
+    else:
+        client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+        try:
+            starred_repos = client.get_starred_repos(per_page=30)
+            repo_names = [r.get("full_name") for r in starred_repos if r.get("full_name")]
+
+            if not repo_names:
+                result = {"added": 0, "skipped": 0, "from_cache": False, "repos_searched": 0, "issues_found": 0}
+            else:
+                issues = client.search_good_first_issues(repo_names, per_page=20)
+                storage.set_cache(cache_key, json_mod.dumps(issues), hours=24)
+                sync_result = qm.sync_external_issues(issues)
+                result = {
+                    **sync_result,
+                    "from_cache": False,
+                    "repos_searched": len(repo_names),
+                    "issues_found": len(issues),
+                }
+        except GitHubClientError as e:
+            if json_output:
+                print(json.dumps({"error": str(e), "code": 1}))
+            else:
+                print(f"Error: {e}", file=sys.stderr)
+            raise typer.Exit(1)
+
+    def _human(d):
+        cache_str = " (from cache)" if d.get("from_cache") else ""
+        print(f"External issue discovery complete{cache_str}:")
+        if d.get("repos_searched"):
+            print(f"  Searched: {d['repos_searched']} starred repos")
+        if d.get("issues_found"):
+            print(f"  Found: {d['issues_found']} good-first-issue candidates")
+        print(f"  Added: {d['added']} new quests")
+        print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("enhance")
+def quests_enhance(
+    quest_id: int = typer.Argument(..., help="Quest ID to enhance"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Enhance a quest with AI-generated description and difficulty."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    result = qm.enhance_quest(quest_id)
+
+    if not result.get("success"):
+        error = result.get("error", "Unknown error")
+        if "not found" in error.lower():
+            _quest_not_found(quest_id, json_output)
+        if json_output:
+            print(json.dumps({"error": error, "code": 1}))
+        else:
+            print(f"Error: {error}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    def _human(d):
+        q = d["quest"]
+        print(f"Quest #{q['id']} enhanced:")
+        print(f"  {q['title']}")
+        if q.get("ai_description"):
+            print(f"  AI Description: {q['ai_description']}")
+        if q.get("difficulty"):
+            reasoning = f" - {q['difficulty_reasoning']}" if q.get("difficulty_reasoning") else ""
+            print(f"  Difficulty: {q['difficulty']}/5{reasoning}")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("enhance-batch")
+def quests_enhance_batch(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    limit: int = typer.Option(5, help="Number of quests to enhance (max 20)"),
+):
+    """Batch enhance pending quests that lack AI descriptions."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    result = qm.enhance_pending_quests(limit=limit)
+
+    if not result.get("success"):
+        error = result.get("error", "Unknown error")
+        if json_output:
+            print(json.dumps({"error": error, "code": 1}))
+        else:
+            print(f"Error: {error}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    def _human(d):
+        print("Batch enhancement complete:")
+        print(f"  Enhanced: {d['enhanced']}/{d['total_requested']} quests")
+        print(f"  Errors: {len(d['errors'])}")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("ai-status")
+def quests_ai_status(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Check if AI features are configured and available."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    data = qm.get_ai_status()
+
+    def _human(d):
+        status = "Enabled" if d["enabled"] else "Disabled"
+        print(f"AI Features: {status}")
+        if not d["enabled"]:
+            print(f"  {d['message']}")
+
+    _output(data, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# achievements subcommands
+# ---------------------------------------------------------------------------
+
+
+@achievements_app.command("list")
+def achievements_list(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    category: Optional[str] = typer.Option(None, help="Filter by category (streak, commits)"),
+):
+    """Show all achievements with unlock status."""
+    from src.achievements import get_all_achievements_status
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    unlocked = storage.get_unlocked_achievements()
+    all_achievements = get_all_achievements_status(unlocked)
+
+    if category:
+        all_achievements = [a for a in all_achievements if a["category"] == category]
+
+    total = len(all_achievements)
+    unlocked_count = sum(1 for a in all_achievements if a["unlocked"])
+
+    data = {
+        "achievements": all_achievements,
+        "summary": {"total": total, "unlocked": unlocked_count},
+    }
+
+    def _human(d):
+        s = d["summary"]
+        print(f"Achievements ({s['unlocked']}/{s['total']} unlocked):\n")
+
+        by_category = {}
+        for a in d["achievements"]:
+            by_category.setdefault(a["category"].capitalize(), []).append(a)
+
+        for cat_name, items in by_category.items():
+            print(f"  {cat_name}:")
+            for a in items:
+                if a["unlocked"]:
+                    date_str = a["unlocked_at"][:10] if a["unlocked_at"] else ""
+                    print(f"    [x] {a['name']} - {a['description']} (unlocked {date_str})")
+                else:
+                    print(f"    [ ] {a['name']} - {a['description']} (need {a['threshold']})")
+            print()
+
+    _output(data, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# ideas list/add/promote/sync subcommands
+# ---------------------------------------------------------------------------
+
+
+@ideas_app.command("list")
+def ideas_list(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    status: Optional[str] = typer.Option(None, help="Filter by status (active, completed, promoted)"),
+):
+    """List ideas from the database."""
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    ideas = storage.get_ideas(status=status)
+
+    data = {"ideas": ideas}
+
+    def _human(d):
+        items = d["ideas"]
+        if not items:
+            print("No ideas found.")
+            return
+        active_count = sum(1 for i in items if i.get("status") == "active")
+        print(f"Ideas ({active_count} active):\n")
+        for item in items:
+            print(f"  #{item['id']}  {item['content']}")
+
+    _output(data, json_output, _human)
+
+
+@ideas_app.command("add")
+def ideas_add(
+    content: str = typer.Argument(..., help="Idea content"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Add a new idea to the database and IDEAS.md."""
+    from src.ideas import add_idea
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    idea_id = storage.create_idea(content)
+    add_idea(content)
+    idea = storage.get_idea(idea_id)
+
+    data = {"idea": idea}
+
+    def _human(d):
+        i = d["idea"]
+        print("Idea created:")
+        print(f"  #{i['id']}  {i['content']}")
+
+    _output(data, json_output, _human)
+
+
+@ideas_app.command("promote")
+def ideas_promote(
+    idea_id: int = typer.Argument(..., help="Idea ID to promote to a quest"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Promote an idea to a quest."""
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    quest = qm.promote_idea_to_quest(idea_id)
+
+    if not quest:
+        if json_output:
+            print(json.dumps({"error": "Idea not found", "code": 2}))
+        else:
+            print(f"Idea {idea_id} not found.", file=sys.stderr)
+        raise typer.Exit(2)
+
+    data = {"quest": quest}
+
+    def _human(d):
+        q = d["quest"]
+        print(f"Idea #{idea_id} promoted to quest #{q['id']}:")
+        print(f"  {q['title']}")
+
+    _output(data, json_output, _human)
+
+
+@ideas_app.command("sync")
+def ideas_sync(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Sync ideas between IDEAS.md and database."""
+    from src.ideas import sync_ideas_to_db
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    result = sync_ideas_to_db(storage)
+
+    def _human(d):
+        print("Ideas sync complete:")
+        print(f"  Added: {d['added']} new ideas from IDEAS.md")
+        print(f"  Updated: {d['updated']} status change")
+        print(f"  File: {d['total_in_file']} ideas | Database: {d['total_in_db']} ideas")
+
+    _output(result, json_output, _human)
 
 
 # ---------------------------------------------------------------------------
