@@ -20,6 +20,8 @@ Do not use system python as pytest is not installed globally.
 
 The project exposes a `code-daily` CLI (Typer-based). Install with `pip install -e .` in the venv.
 
+**Important:** Always invoke as `.venv/bin/code-daily`, never as `python -m code_daily` (there is no `__main__.py` module entry point).
+
 ```
 code-daily issues list [--json] [--labels TEXT] [--repo TEXT] [--limit INT]
 code-daily issues top [--json]
