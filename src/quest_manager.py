@@ -440,6 +440,46 @@ class QuestManager:
 
         return {"added": added, "skipped": skipped}
 
+    def sync_skillvault_findings(self, findings: list) -> dict:
+        """
+        Sync skillvault findings to quests, skipping duplicates.
+
+        Creates new quests from incomplete-work markers surfaced by skillvault
+        (TODOs, "ready to build", "planned", etc.) across CLAUDE.md files,
+        skill definitions, and specs in every indexed project.
+
+        Args:
+            findings: List of SkillvaultFinding objects from the scanner
+
+        Returns:
+            Dictionary with 'added' and 'skipped' counts
+        """
+        added = 0
+        skipped = 0
+
+        for finding in findings:
+            source_ref = finding.source_ref
+
+            if self.storage.quest_exists_by_source_ref("skillvault", source_ref):
+                skipped += 1
+                continue
+
+            # Store the snippet as description so the quest has context when
+            # shown in the dashboard or enhanced by the LLM.
+            description = finding.snippet.strip()
+            if len(description) > 500:
+                description = description[:497] + "..."
+
+            self.storage.create_quest(
+                title=finding.quest_title,
+                source="skillvault",
+                source_ref=source_ref,
+                description=description if description else None,
+            )
+            added += 1
+
+        return {"added": added, "skipped": skipped}
+
     def enhance_quest(self, quest_id: int) -> dict:
         """
         Enhance a quest with AI-generated description and difficulty.

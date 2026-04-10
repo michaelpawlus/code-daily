@@ -45,6 +45,7 @@ code-daily quests skip QUEST_ID [--json] [--save-idea]
 code-daily quests summary [--json]
 code-daily quests sync-issues [--json]
 code-daily quests scan-todos [--json]
+code-daily quests scan-skillvault [--json]
 code-daily quests discover [--json]
 code-daily quests enhance QUEST_ID [--json]
 code-daily quests enhance-batch [--json] [--limit INT]
@@ -61,6 +62,17 @@ code-daily cron [--install] [--uninstall]
 ```
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).
+
+## Quest Discovery Sources
+
+Quests can be created from several sources, each with its own sync command:
+
+- `quests sync-issues` — your own GitHub issues
+- `quests scan-todos` — TODO/FIXME comments in this repo's Python files
+- `quests scan-skillvault` — incomplete-work markers (TODO, "ready to build", "planned", "coming soon", etc.) surfaced from `skillvault`'s cross-project index of CLAUDE.md files, skill SKILL.md files, and specs. Requires `skillvault` on PATH (or installed at `~/projects/skillvault/.venv/bin/skillvault`); silently no-ops if absent. Run `skillvault scan` first to populate the index.
+- `quests discover` — external good-first-issue candidates from starred GitHub repos
+
+All four are deduped via `(source, source_ref)` so they're safe to re-run.
 
 ## Agent Workflow: Themed News Digest
 

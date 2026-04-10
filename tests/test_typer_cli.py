@@ -544,6 +544,17 @@ class TestQuestsSync:
         assert "added" in data
         assert "skipped" in data
 
+    @patch("src.quest_manager.QuestManager.sync_skillvault_findings", return_value={"added": 3, "skipped": 1})
+    @patch("src.skillvault_scanner.scan_skillvault", return_value=[])
+    @patch("src.storage.CommitStorage")
+    def test_scan_skillvault_json(self, mock_storage_cls, mock_scan, mock_sync):
+        result = runner.invoke(app, ["quests", "scan-skillvault", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["added"] == 3
+        assert data["skipped"] == 1
+        assert data["scanned"] == 0
+
 
 # ---------------------------------------------------------------------------
 # quests AI

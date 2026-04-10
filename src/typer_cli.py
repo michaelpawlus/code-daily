@@ -1167,6 +1167,37 @@ def quests_scan_todos(
     _output(result, json_output, _human)
 
 
+@quests_app.command("scan-skillvault")
+def quests_scan_skillvault(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Scan skillvault for incomplete-work markers across all projects and create quests."""
+    from src.quest_manager import QuestManager
+    from src.skillvault_scanner import scan_skillvault
+    from src.storage import CommitStorage
+
+    findings = scan_skillvault()
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    result = qm.sync_skillvault_findings(findings)
+    result["scanned"] = len(findings)
+
+    def _human(d):
+        if d["scanned"] == 0:
+            print(
+                "Skillvault scan complete: no findings "
+                "(is skillvault installed and indexed?)"
+            )
+            return
+        print("Skillvault scan complete:")
+        print(f"  Scanned: {d['scanned']} findings")
+        print(f"  Added: {d['added']} new quests")
+        print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
 @quests_app.command("discover")
 def quests_discover(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
