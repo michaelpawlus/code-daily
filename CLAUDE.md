@@ -29,6 +29,7 @@ code-daily vault scan [--json] [--since INT] [--folders TEXT] [--search TEXT]
 code-daily vault ideas [--json]
 code-daily streak show [--json]
 code-daily streak history [--json] [--days INT]
+code-daily streak insights [--json] [--days INT]
 code-daily suggest [--json]
 code-daily diversity [--json] [--days INT]
 code-daily ideas from-news [--json] [--hours INT] [--limit INT]
@@ -58,6 +59,7 @@ code-daily news trends [--json] [--days INT]
 code-daily news podcast [--json] [--date TEXT] [--voice TEXT]
 code-daily notify test
 code-daily notify status
+code-daily scaffold justfile [PROJECT_PATH] [--json] [--dry-run] [--force]
 code-daily cron [--install] [--uninstall]
 ```
 

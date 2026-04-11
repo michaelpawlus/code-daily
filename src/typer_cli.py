@@ -299,6 +299,115 @@ def streak_history(
     _output(data, json_output, _human)
 
 
+@streak_app.command("insights")
+def streak_insights(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    days: int = typer.Option(90, help="Analysis window in days"),
+):
+    """Analyze commit patterns and surface actionable insights."""
+    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
+    from src.github_client import GitHubClient, GitHubClientError
+    from src.storage import CommitStorage, get_commit_events_with_history
+    from src.streak_calculator import calculate_streak
+    from src.streak_insights import compute_insights
+
+    try:
+        validate_config()
+    except ValueError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
+
+    try:
+        raw_events = client.get_user_events(per_page=100)
+        commit_events = get_commit_events_with_history(client, storage)
+    except GitHubClientError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    streak_info = calculate_streak(commit_events) if commit_events else {
+        "current_streak": 0, "longest_streak": 0,
+        "streak_active": False, "last_commit_date": None, "commit_dates": [],
+    }
+
+    data = compute_insights(raw_events, commit_events, streak_info, days=days)
+
+    def _human(d):
+        period = d["period"]
+        print(f"=== Streak Insights (last {period['days']} days) ===\n")
+
+        # Time of day
+        tod = d["time_of_day"]
+        total = tod["morning"] + tod["afternoon"] + tod["evening"] + tod["night"]
+        if total > 0:
+            def _bar(n):
+                pct = n / total * 100
+                blocks = round(pct / 20)
+                return "\u2588" * blocks + "\u2591" * (5 - blocks)
+
+            def _pct(n):
+                return f"{n / total * 100:.0f}%"
+
+            print(f"  \u23f0 Peak coding time: {tod['peak'].title()} — {_pct(tod[tod['peak']])} of commits")
+            print(f"     Morning: {_bar(tod['morning'])} {_pct(tod['morning'])}  |  Afternoon: {_bar(tod['afternoon'])} {_pct(tod['afternoon'])}")
+            print(f"     Evening: {_bar(tod['evening'])} {_pct(tod['evening'])}  |  Night: {_bar(tod['night'])} {_pct(tod['night'])}")
+        else:
+            print("  \u23f0 No time-of-day data (need raw API events)")
+        print()
+
+        # Day of week
+        dow = d["day_of_week"]
+        day_abbr = {"monday": "Mon", "tuesday": "Tue", "wednesday": "Wed",
+                    "thursday": "Thu", "friday": "Fri", "saturday": "Sat", "sunday": "Sun"}
+        day_names = list(day_abbr.keys())
+        max_day = max((dow[dn] for dn in day_names), default=1) or 1
+        bars = "   ".join(
+            f"{day_abbr[dn]} {'█' * max(1, round(dow[dn] / max_day * 3))}"
+            + "░" * (3 - max(1, round(dow[dn] / max_day * 3)))
+            for dn in day_names
+        )
+        print(f"  📅 Strongest day: {dow['strongest'].title()}  |  Weakest: {dow['weakest'].title()}")
+        print(f"     {bars}")
+        print(f"     Weekdays: {dow['weekday_pct']}% of commit days")
+        print()
+
+        # Repos
+        repos = d["repos"]
+        print(f"  📦 Active repos: {repos['active_count']}  |  Dormant: {repos['dormant_count']}")
+        for r in repos["top"][:5]:
+            print(f"     {r['repo']:<30s} {r['commits']:>3d} commits (last: {r['last_commit']})")
+        if len(repos["top"]) > 5:
+            print(f"     ... and {len(repos['top']) - 5} more")
+        print()
+
+        # Streak patterns
+        sp = d["streak_patterns"]
+        if sp["total_streaks"] > 0:
+            longest = max((s["length"] for s in sp["all_streaks"]), default=0)
+            print(f"  📊 Streak patterns: {sp['total_streaks']} streaks, avg {sp['average_length']} days, median {sp['median_length']}")
+            killer = sp['streak_killer_day'].title() if sp['streak_killer_day'] else 'N/A'
+            print(f"     Longest: {longest} days  |  Streak killer: {killer}")
+        else:
+            print("  📊 No streak patterns found in this period")
+        print()
+
+        # Risk
+        risk = d["risk"]
+        level_icon = {"low": "🛡️", "medium": "⚠️", "high": "🚨"}.get(risk["level"], "?")
+        print(f"  {level_icon} Streak risk: {risk['level'].upper()}")
+        print(f"     {risk['hours_remaining']}h until deadline  |  Historical break rate at day {streak_info['current_streak']}: {risk['historical_break_rate']:.0%}")
+
+    _output(data, json_output, _human)
+
+
 # ---------------------------------------------------------------------------
 # suggest command
 # ---------------------------------------------------------------------------
@@ -1504,6 +1613,44 @@ def ideas_sync(
         print(f"  Added: {d['added']} new ideas from IDEAS.md")
         print(f"  Updated: {d['updated']} status change")
         print(f"  File: {d['total_in_file']} ideas | Database: {d['total_in_db']} ideas")
+
+    _output(result, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# scaffold subcommands
+# ---------------------------------------------------------------------------
+
+scaffold_app = typer.Typer(help="Scaffolding commands")
+app.add_typer(scaffold_app, name="scaffold")
+
+
+@scaffold_app.command("justfile")
+def scaffold_justfile_cmd(
+    project_path: str = typer.Argument(".", help="Project directory to scaffold"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print instead of writing"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing justfile"),
+):
+    """Generate a tailored justfile for a project."""
+    from src.justfile_scaffolder import scaffold_justfile
+
+    try:
+        result = scaffold_justfile(project_path, dry_run=dry_run, force=force)
+    except FileExistsError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    def _human(d):
+        if d["dry_run"]:
+            print(d["content"])
+        else:
+            print(f"Justfile written to {d['justfile_path']}")
+            print(f"  Project type: {d['project_type']}")
+            print(f"  Recipes: {', '.join(d['recipes_generated'])}")
 
     _output(result, json_output, _human)
 
