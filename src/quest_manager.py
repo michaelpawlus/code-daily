@@ -78,9 +78,10 @@ class QuestManager:
             except (ValueError, TypeError):
                 pass  # Skip age bonus if date parsing fails
 
-        # Source priority: external commitments rank higher
+        # Source priority: career-building gaps and external commitments rank highest
         source_scores = {
-            "external": 4,  # External contribution opportunities rank highest
+            "beacon_gap": 5,  # Skill gaps from job market analysis — most actionable
+            "external": 4,  # External contribution opportunities
             "github_issue": 3,
             "todo_scan": 2,
             "ideas_md": 1,

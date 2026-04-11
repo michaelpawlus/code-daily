@@ -1307,6 +1307,83 @@ def quests_scan_skillvault(
     _output(result, json_output, _human)
 
 
+@quests_app.command("sync-beacon-gaps")
+def quests_sync_beacon_gaps(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Max gaps to sync"),
+):
+    """Sync skill gaps from beacon into quests for focused practice."""
+    import json as json_mod
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from src.storage import CommitStorage
+
+    # Find beacon CLI
+    beacon_bin = shutil.which("beacon")
+    if not beacon_bin:
+        fallback = Path("/home/michaelpawlus/projects/beacon/.venv/bin/beacon")
+        if fallback.exists():
+            beacon_bin = str(fallback)
+
+    if not beacon_bin:
+        result = {"error": "beacon CLI not found", "code": 1, "added": 0, "skipped": 0}
+        _output(result, json_output, lambda d: print("beacon CLI not found — install beacon or add it to PATH"))
+        return
+
+    # Fetch gaps from beacon
+    try:
+        proc = subprocess.run(
+            [beacon_bin, "gaps", "export", "--limit", str(limit), "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        result = {"error": "beacon gaps export failed", "code": 1, "added": 0, "skipped": 0}
+        _output(result, json_output, lambda d: print("Failed to run beacon gaps export"))
+        return
+
+    if proc.returncode != 0:
+        result = {"error": "beacon gaps export returned non-zero", "code": 1, "added": 0, "skipped": 0}
+        _output(result, json_output, lambda d: print("beacon gaps export failed — run 'beacon gaps analyze' first"))
+        return
+
+    try:
+        gaps = json_mod.loads(proc.stdout)
+    except json_mod.JSONDecodeError:
+        result = {"error": "Invalid JSON from beacon", "code": 1, "added": 0, "skipped": 0}
+        _output(result, json_output, lambda d: print("Invalid JSON from beacon gaps export"))
+        return
+
+    # Create quests, deduplicating by source_ref
+    storage = CommitStorage()
+    added = 0
+    skipped = 0
+
+    for gap in gaps:
+        source_ref = gap.get("source_ref", "")
+        if storage.quest_exists_by_source_ref("beacon_gap", source_ref):
+            skipped += 1
+            continue
+        storage.create_quest(
+            title=gap["title"],
+            source="beacon_gap",
+            source_ref=source_ref,
+            description=gap.get("description"),
+        )
+        added += 1
+
+    result = {"added": added, "skipped": skipped, "total_gaps": len(gaps)}
+
+    def _human(d):
+        print("Beacon skill gap sync complete:")
+        print(f"  Gaps found: {d['total_gaps']}")
+        print(f"  Added: {d['added']} new quests")
+        print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
 @quests_app.command("discover")
 def quests_discover(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
