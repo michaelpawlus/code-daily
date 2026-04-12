@@ -2,6 +2,8 @@
 GitHub API client for fetching user activity.
 """
 
+from datetime import datetime, timedelta
+
 import requests
 
 
@@ -170,6 +172,95 @@ class GitHubClient:
 
         data = response.json()
         return data.get("items", [])
+
+    def get_contribution_calendar(self, days: int = 365) -> list[dict]:
+        """
+        Fetch the contribution calendar via the GitHub GraphQL API.
+
+        Returns the same data that powers the green-square graph on a
+        user's GitHub profile — an authoritative, gap-free record of
+        which days had contributions.
+
+        Args:
+            days: How many days of history to request (max ~365).
+
+        Returns:
+            List of dicts: [{"date": "YYYY-MM-DD", "count": N}, ...]
+            Only days with count > 0 are included.
+
+        Raises:
+            GitHubClientError: If the API request fails.
+        """
+        now = datetime.utcnow()
+        from_dt = now - timedelta(days=days)
+        query = """
+        query($username: String!, $from: DateTime!, $to: DateTime!) {
+          user(login: $username) {
+            contributionsCollection(from: $from, to: $to) {
+              contributionCalendar {
+                totalContributions
+                weeks {
+                  contributionDays {
+                    date
+                    contributionCount
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        variables = {
+            "username": self.username,
+            "from": from_dt.strftime("%Y-%m-%dT00:00:00Z"),
+            "to": now.strftime("%Y-%m-%dT23:59:59Z"),
+        }
+
+        response = self.session.post(
+            f"{self.BASE_URL}/graphql",
+            json={"query": query, "variables": variables},
+        )
+
+        if response.status_code == 401:
+            raise GitHubClientError(
+                "Authentication failed. Check your GITHUB_TOKEN is valid."
+            )
+        elif response.status_code == 403:
+            remaining = response.headers.get("X-RateLimit-Remaining", "unknown")
+            raise GitHubClientError(
+                f"API rate limit exceeded or access forbidden. "
+                f"Remaining requests: {remaining}"
+            )
+        elif not response.ok:
+            raise GitHubClientError(
+                f"GitHub GraphQL error: {response.status_code} - {response.text}"
+            )
+
+        data = response.json()
+
+        if "errors" in data:
+            raise GitHubClientError(
+                f"GraphQL query error: {data['errors']}"
+            )
+
+        calendar = (
+            data.get("data", {})
+            .get("user", {})
+            .get("contributionsCollection", {})
+            .get("contributionCalendar", {})
+        )
+
+        result = []
+        for week in calendar.get("weeks", []):
+            for day in week.get("contributionDays", []):
+                count = day.get("contributionCount", 0)
+                if count > 0:
+                    result.append({
+                        "date": day["date"],
+                        "count": count,
+                    })
+
+        return result
 
     def get_assigned_issues(self, state: str = "open", per_page: int = 30) -> list[dict]:
         """

@@ -216,6 +216,52 @@ class TestStreakShow:
         assert "error" in data
 
 
+class TestStreakRace:
+    @patch("src.storage.get_commit_events_with_history", return_value=MOCK_COMMIT_EVENTS)
+    @patch("src.storage.CommitStorage")
+    @patch("src.github_client.GitHubClient")
+    @patch("src.config.validate_config")
+    def test_json_output(self, mock_config, mock_client, mock_storage, mock_commits):
+        result = runner.invoke(app, ["streak", "race", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "current_streak" in data
+        assert "longest_streak" in data
+        assert "progress" in data
+        assert "projected_record_date" in data
+        assert "days_to_record" in data
+        assert "is_record" in data
+        assert isinstance(data["progress"], float)
+
+    @patch("src.storage.get_commit_events_with_history", return_value=MOCK_COMMIT_EVENTS)
+    @patch("src.storage.CommitStorage")
+    @patch("src.github_client.GitHubClient")
+    @patch("src.config.validate_config")
+    def test_human_output(self, mock_config, mock_client, mock_storage, mock_commits):
+        result = runner.invoke(app, ["streak", "race"])
+        assert result.exit_code == 0
+        assert "STREAK RACE" in result.output
+
+    @patch("src.storage.get_commit_events_with_history", return_value=[])
+    @patch("src.storage.CommitStorage")
+    @patch("src.github_client.GitHubClient")
+    @patch("src.config.validate_config")
+    def test_no_commits(self, mock_config, mock_client, mock_storage, mock_commits):
+        result = runner.invoke(app, ["streak", "race", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["current_streak"] == 0
+        assert data["progress"] == 0.0
+        assert data["is_record"] is False
+
+    @patch("src.config.validate_config", side_effect=ValueError("Missing GITHUB_TOKEN"))
+    def test_config_error(self, mock_config):
+        result = runner.invoke(app, ["streak", "race", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+
+
 class TestStreakHistory:
     @patch("src.storage.CommitStorage")
     def test_empty_history(self, mock_storage_cls):

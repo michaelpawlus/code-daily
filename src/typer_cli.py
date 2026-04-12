@@ -273,6 +273,111 @@ def streak_show(
     _output(data, json_output, _human)
 
 
+@streak_app.command("race")
+def streak_race(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show a visual race toward your all-time streak record."""
+    from datetime import datetime, timedelta
+
+    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
+    from src.github_client import GitHubClient, GitHubClientError
+    from src.storage import CommitStorage, get_commit_events_with_history
+    from src.streak_calculator import calculate_streak
+
+    try:
+        validate_config()
+    except ValueError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(str(e), file=sys.stderr)
+        raise typer.Exit(1)
+
+    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
+    storage = CommitStorage()
+
+    try:
+        commit_events = get_commit_events_with_history(client, storage)
+    except GitHubClientError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    streak_info = calculate_streak(commit_events) if commit_events else {
+        "current_streak": 0, "longest_streak": 0,
+        "streak_active": False, "last_commit_date": None, "commit_dates": [],
+    }
+
+    current = streak_info["current_streak"]
+    longest = streak_info["longest_streak"]
+    active = streak_info["streak_active"]
+    days_to_record = max(0, longest - current + 1) if current < longest else 0
+    is_record = current >= longest and current > 0
+
+    today = datetime.now().date()
+    projected_record_date = (
+        str(today + timedelta(days=days_to_record)) if days_to_record > 0 else None
+    )
+
+    # Progress as fraction of the record (cap at 1.0 once record is met/beaten)
+    progress = current / longest if longest > 0 else 0.0
+    progress = min(progress, 1.0)
+
+    data = {
+        "current_streak": current,
+        "longest_streak": longest,
+        "streak_active": active,
+        "days_to_record": days_to_record,
+        "is_record": is_record,
+        "progress": round(progress, 3),
+        "projected_record_date": projected_record_date,
+    }
+
+    def _human(d):
+        cur = d["current_streak"]
+        lng = d["longest_streak"]
+        pct = d["progress"]
+        dtr = d["days_to_record"]
+
+        print("  === STREAK RACE ===\n")
+
+        if cur == 0:
+            print("  No active streak. Commit today to start the race!")
+            print(f"  Record to beat: {lng} days")
+            return
+
+        # Progress bar: 30 chars wide
+        bar_width = 30
+        filled = int(pct * bar_width)
+        bar = "█" * filled + "░" * (bar_width - filled)
+        pct_display = int(pct * 100)
+
+        print(f"  [{bar}] {pct_display}%")
+        print(f"  Day {cur} of {lng}\n")
+
+        if d["is_record"]:
+            lead = cur - lng + 1 if cur > lng else 0
+            if lead > 0:
+                print(f"  🏆 NEW RECORD! You're {lead} day{'s' if lead != 1 else ''} past your old record!")
+            else:
+                print("  🏆 You've TIED your record! One more day to break it!")
+        else:
+            print(f"  {dtr} day{'s' if dtr != 1 else ''} to beat your record")
+            if d["projected_record_date"]:
+                print(f"  Record-break date: {d['projected_record_date']}")
+
+        print()
+        if d["streak_active"]:
+            print("  ✅ Today's commit is in. See you tomorrow.")
+        else:
+            print("  ⏳ No commit yet today — don't break the chain!")
+
+    _output(data, json_output, _human)
+
+
 @streak_app.command("history")
 def streak_history(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),

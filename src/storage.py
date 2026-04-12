@@ -212,6 +212,13 @@ class CommitStorage:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_suggestion_log_date ON suggestion_log(suggested_at)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS contributions (
+                date TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0,
+                fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         self._commit_and_sync(conn)
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -341,6 +348,49 @@ class CommitStorage:
             """
             SELECT DISTINCT date FROM commits ORDER BY date DESC
             """
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def save_contributions(self, contributions: list[dict]) -> int:
+        """
+        Save contribution calendar entries from the GraphQL API.
+
+        Uses INSERT OR REPLACE so re-fetches update the count.
+
+        Args:
+            contributions: List of {"date": "YYYY-MM-DD", "count": N}
+
+        Returns:
+            Number of rows written.
+        """
+        conn = self._get_connection()
+        written = 0
+        for entry in contributions:
+            date = entry.get("date", "")
+            count = entry.get("count", 0)
+            if not date:
+                continue
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO contributions (date, count, fetched_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                """,
+                (date, count),
+            )
+            written += 1
+        self._commit_and_sync(conn)
+        return written
+
+    def get_contribution_dates(self) -> list[str]:
+        """
+        Get all dates with contributions from the GraphQL calendar.
+
+        Returns:
+            List of YYYY-MM-DD strings, sorted descending.
+        """
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT date FROM contributions WHERE count > 0 ORDER BY date DESC"
         ).fetchall()
         return [row[0] for row in rows]
 
@@ -930,21 +980,48 @@ def get_commit_events_with_history(
     """
     Fetch commits from API, save to storage, and return all stored commits.
 
+    Also fetches the contribution calendar from the GraphQL API to fill in
+    dates the Events API missed.  Synthetic placeholder events are created
+    for contribution-only dates so the streak calculator sees them.
+
     Args:
         client: GitHub client for fetching new events. Required if fetch_new is True.
         storage: Commit storage instance. Creates default if not provided.
         fetch_new: Whether to fetch new commits from the API.
 
     Returns:
-        List of all commit events from storage.
+        List of all commit events from storage, merged with any
+        contribution-only dates.
     """
     if storage is None:
         storage = CommitStorage()
 
     if fetch_new and client is not None:
-        # Fetch new events from GitHub
+        # Fetch new events from GitHub REST API
         events = client.get_user_events(per_page=100)
         commit_events = parse_commit_events(events)
         storage.save_commits(commit_events)
 
-    return storage.get_all_commits()
+        # Fetch contribution calendar from GraphQL API
+        try:
+            contributions = client.get_contribution_calendar(days=365)
+            storage.save_contributions(contributions)
+        except Exception:
+            pass  # Non-fatal: streak still works with Events API data
+
+    # Get detailed commit events from storage
+    all_events = storage.get_all_commits()
+
+    # Merge contribution-only dates as synthetic events
+    commit_dates = {e["date"] for e in all_events}
+    for contrib_date in storage.get_contribution_dates():
+        if contrib_date not in commit_dates:
+            all_events.append({
+                "date": contrib_date,
+                "repo": "github/contribution",
+                "commits": [{"sha": "contrib", "message": ""}],
+                "commit_count": 1,
+            })
+
+    all_events.sort(key=lambda x: x["date"], reverse=True)
+    return all_events
