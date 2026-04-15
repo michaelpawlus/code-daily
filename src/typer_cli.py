@@ -23,6 +23,7 @@ streak_app = typer.Typer(help="Streak tracking commands")
 ideas_app = typer.Typer(help="Project idea generation commands")
 quests_app = typer.Typer(help="Quest management commands")
 achievements_app = typer.Typer(help="Achievement tracking commands")
+routines_app = typer.Typer(help="Claude Code Routines migration commands")
 app.add_typer(issues_app, name="issues")
 app.add_typer(vault_app, name="vault")
 app.add_typer(notify_app, name="notify")
@@ -31,6 +32,7 @@ app.add_typer(streak_app, name="streak")
 app.add_typer(ideas_app, name="ideas")
 app.add_typer(quests_app, name="quests")
 app.add_typer(achievements_app, name="achievements")
+app.add_typer(routines_app, name="routines")
 
 
 def _output(data, as_json: bool, human_fn=None):
@@ -858,6 +860,81 @@ def _uninstall_cron():
         raise typer.Exit(1)
 
     print("Removed code-daily cron entries.")
+
+
+# ---------------------------------------------------------------------------
+# routines subcommands (Claude Code Routines migration)
+# ---------------------------------------------------------------------------
+
+
+def _print_routines_plan_human(plan_dict: dict) -> None:
+    summary = plan_dict["summary"]
+    print(f"Scanned {summary['total']} cron entries:", file=sys.stderr)
+    print(f"  ✅ ready:          {summary['ready']}", file=sys.stderr)
+    print(f"  ⚠️  needs_refactor: {summary['needs_refactor']}", file=sys.stderr)
+    print(f"  ❌ blocked:        {summary['blocked']}", file=sys.stderr)
+    print(file=sys.stderr)
+    for entry in plan_dict["entries"]:
+        emoji = {"ready": "✅", "needs_refactor": "⚠️", "blocked": "❌"}[entry["status"]]
+        cmd = f"code-daily {entry['code_daily_command']}" if entry["code_daily_command"] else "(unparsed)"
+        print(f"{emoji} {entry['human_schedule']:<30} {cmd}")
+        print(f"   → {entry['reason']}")
+        if entry["routine_prompt"]:
+            print(f"   {entry['routine_prompt']}")
+        print()
+    print(f"Docs: {plan_dict['routines_docs_url']}", file=sys.stderr)
+
+
+@routines_app.command("plan")
+def routines_plan(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Classify each code-daily cron entry by migratability to Claude Code Routines."""
+    from src.main import _get_cron_entries
+    from src.routines_migrator import build_plan
+
+    plan = build_plan(_get_cron_entries())
+    plan_dict = plan.to_dict()
+
+    if json_output:
+        print(json.dumps(plan_dict, indent=2, default=str))
+    else:
+        _print_routines_plan_human(plan_dict)
+
+
+@routines_app.command("export")
+def routines_export(
+    output: Optional[str] = typer.Option(None, "--output", help="Output markdown path (defaults to vault project-ideas folder)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Write a Claude Code Routines migration guide to the Obsidian vault."""
+    import datetime
+
+    from src.main import _get_cron_entries
+    from src.routines_migrator import build_plan, render_migration_guide_md
+
+    plan = build_plan(_get_cron_entries())
+    today = datetime.date.today().isoformat()
+    markdown = render_migration_guide_md(plan, today)
+
+    if output:
+        target = output
+    else:
+        vault_path = _get_vault_path()
+        target = os.path.join(vault_path, "project-ideas", f"routines-migration-{today}.md")
+
+    os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+    with open(target, "w") as f:
+        f.write(markdown)
+
+    result = {"written": target, "summary": plan.summary}
+    if json_output:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print(f"Wrote migration guide to: {target}", file=sys.stderr)
+        print(f"  ✅ ready:          {plan.summary['ready']}")
+        print(f"  ⚠️  needs_refactor: {plan.summary['needs_refactor']}")
+        print(f"  ❌ blocked:        {plan.summary['blocked']}")
 
 
 # ---------------------------------------------------------------------------

@@ -62,9 +62,25 @@ code-daily notify test
 code-daily notify status
 code-daily scaffold justfile [PROJECT_PATH] [--json] [--dry-run] [--force]
 code-daily cron [--install] [--uninstall]
+code-daily routines plan [--json]
+code-daily routines export [--json] [--output PATH]
 ```
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).
+
+## Claude Code Routines Migration
+
+`code-daily routines plan` / `code-daily routines export` classify your current
+`code-daily cron` entries by how migratable they are to native Claude Code
+Routines (cloud-hosted scheduled tasks, launched April 2026). Statuses:
+
+- **✅ ready** — cloud-safe, emits a ready-to-paste `/schedule` prompt
+- **⚠️ needs_refactor** — relies on local vault or filesystem state
+- **❌ blocked** — fundamentally incompatible (desktop notifications, sub-hourly)
+
+Classification rules live in `src/routines_migrator.py:COMMAND_RULES`. Add a
+rule there whenever a new recurring command is introduced so the migration
+report stays accurate. Routines docs: <https://code.claude.com/docs/en/web-scheduled-tasks>.
 
 ## Quest Discovery Sources
 
