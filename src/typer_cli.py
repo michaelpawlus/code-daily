@@ -1392,34 +1392,16 @@ def quests_sync_issues(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Sync GitHub issues assigned to you as quests."""
-    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
-    from src.github_client import GitHubClient, GitHubClientError
-    from src.quest_manager import QuestManager
-    from src.storage import CommitStorage
+    from src.quest_discovery import run_sync_issues
 
-    try:
-        validate_config()
-    except ValueError as e:
+    result = run_sync_issues()
+
+    if result["status"] in ("skipped", "error"):
         if json_output:
-            print(json.dumps({"error": str(e), "code": 1}))
+            print(json.dumps({"error": result.get("error", ""), "code": 1}))
         else:
-            print(str(e), file=sys.stderr)
+            print(f"Error: {result.get('error', '')}", file=sys.stderr)
         raise typer.Exit(1)
-
-    client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
-    storage = CommitStorage()
-    qm = QuestManager(storage)
-
-    try:
-        issues = client.get_assigned_issues(state="open", per_page=50)
-    except GitHubClientError as e:
-        if json_output:
-            print(json.dumps({"error": str(e), "code": 1}))
-        else:
-            print(f"Error: {e}", file=sys.stderr)
-        raise typer.Exit(1)
-
-    result = qm.sync_github_issues(issues)
 
     def _human(d):
         print("GitHub issue sync complete:")
@@ -1434,18 +1416,9 @@ def quests_scan_todos(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Scan project for TODO/FIXME comments and create quests."""
-    from pathlib import Path
+    from src.quest_discovery import run_scan_todos
 
-    from src.quest_manager import QuestManager
-    from src.storage import CommitStorage
-    from src.todo_scanner import scan_directory
-
-    project_root = Path(__file__).parent.parent
-    todos = scan_directory(project_root)
-
-    storage = CommitStorage()
-    qm = QuestManager(storage)
-    result = qm.sync_todo_comments(todos)
+    result = run_scan_todos()
 
     def _human(d):
         if d["added"] == 0 and d["skipped"] == 0:
@@ -1463,16 +1436,9 @@ def quests_scan_skillvault(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Scan skillvault for incomplete-work markers across all projects and create quests."""
-    from src.quest_manager import QuestManager
-    from src.skillvault_scanner import scan_skillvault
-    from src.storage import CommitStorage
+    from src.quest_discovery import run_scan_skillvault
 
-    findings = scan_skillvault()
-
-    storage = CommitStorage()
-    qm = QuestManager(storage)
-    result = qm.sync_skillvault_findings(findings)
-    result["scanned"] = len(findings)
+    result = run_scan_skillvault()
 
     def _human(d):
         if d["scanned"] == 0:
@@ -1495,67 +1461,25 @@ def quests_sync_beacon_gaps(
     limit: int = typer.Option(10, "--limit", "-l", help="Max gaps to sync"),
 ):
     """Sync skill gaps from beacon into quests for focused practice."""
-    import json as json_mod
-    import shutil
-    import subprocess
-    from pathlib import Path
+    from src.quest_discovery import run_sync_beacon_gaps
 
-    from src.storage import CommitStorage
+    result = run_sync_beacon_gaps(limit=limit)
 
-    # Find beacon CLI
-    beacon_bin = shutil.which("beacon")
-    if not beacon_bin:
-        fallback = Path("/home/michaelpawlus/projects/beacon/.venv/bin/beacon")
-        if fallback.exists():
-            beacon_bin = str(fallback)
-
-    if not beacon_bin:
-        result = {"error": "beacon CLI not found", "code": 1, "added": 0, "skipped": 0}
-        _output(result, json_output, lambda d: print("beacon CLI not found — install beacon or add it to PATH"))
+    if result["status"] in ("skipped", "error"):
+        err = result.get("error", "")
+        payload = {"error": err, "code": 1, "added": 0, "skipped": 0}
+        if "not found" in err:
+            _output(payload, json_output,
+                    lambda d: print("beacon CLI not found — install beacon or add it to PATH"))
+        elif "non-zero" in err:
+            _output(payload, json_output,
+                    lambda d: print("beacon gaps export failed — run 'beacon gaps analyze' first"))
+        elif "invalid JSON" in err:
+            _output(payload, json_output,
+                    lambda d: print("Invalid JSON from beacon gaps export"))
+        else:
+            _output(payload, json_output, lambda d: print(f"Beacon error: {err}"))
         return
-
-    # Fetch gaps from beacon
-    try:
-        proc = subprocess.run(
-            [beacon_bin, "gaps", "export", "--limit", str(limit), "--json"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        result = {"error": "beacon gaps export failed", "code": 1, "added": 0, "skipped": 0}
-        _output(result, json_output, lambda d: print("Failed to run beacon gaps export"))
-        return
-
-    if proc.returncode != 0:
-        result = {"error": "beacon gaps export returned non-zero", "code": 1, "added": 0, "skipped": 0}
-        _output(result, json_output, lambda d: print("beacon gaps export failed — run 'beacon gaps analyze' first"))
-        return
-
-    try:
-        gaps = json_mod.loads(proc.stdout)
-    except json_mod.JSONDecodeError:
-        result = {"error": "Invalid JSON from beacon", "code": 1, "added": 0, "skipped": 0}
-        _output(result, json_output, lambda d: print("Invalid JSON from beacon gaps export"))
-        return
-
-    # Create quests, deduplicating by source_ref
-    storage = CommitStorage()
-    added = 0
-    skipped = 0
-
-    for gap in gaps:
-        source_ref = gap.get("source_ref", "")
-        if storage.quest_exists_by_source_ref("beacon_gap", source_ref):
-            skipped += 1
-            continue
-        storage.create_quest(
-            title=gap["title"],
-            source="beacon_gap",
-            source_ref=source_ref,
-            description=gap.get("description"),
-        )
-        added += 1
-
-    result = {"added": added, "skipped": skipped, "total_gaps": len(gaps)}
 
     def _human(d):
         print("Beacon skill gap sync complete:")
@@ -1571,56 +1495,16 @@ def quests_discover(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Discover external contribution opportunities from starred repos."""
-    import json as json_mod
+    from src.quest_discovery import run_discover
 
-    from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
-    from src.github_client import GitHubClient, GitHubClientError
-    from src.quest_manager import QuestManager
-    from src.storage import CommitStorage
+    result = run_discover()
 
-    try:
-        validate_config()
-    except ValueError as e:
+    if result["status"] in ("skipped", "error"):
         if json_output:
-            print(json.dumps({"error": str(e), "code": 1}))
+            print(json.dumps({"error": result.get("error", ""), "code": 1}))
         else:
-            print(str(e), file=sys.stderr)
+            print(f"Error: {result.get('error', '')}", file=sys.stderr)
         raise typer.Exit(1)
-
-    storage = CommitStorage()
-    qm = QuestManager(storage)
-
-    cache_key = "external_issues"
-    cached_data = storage.get_cache(cache_key)
-
-    if cached_data:
-        issues = json_mod.loads(cached_data)
-        result = qm.sync_external_issues(issues)
-        result["from_cache"] = True
-    else:
-        client = GitHubClient(GITHUB_TOKEN, GITHUB_USERNAME)
-        try:
-            starred_repos = client.get_starred_repos(per_page=30)
-            repo_names = [r.get("full_name") for r in starred_repos if r.get("full_name")]
-
-            if not repo_names:
-                result = {"added": 0, "skipped": 0, "from_cache": False, "repos_searched": 0, "issues_found": 0}
-            else:
-                issues = client.search_good_first_issues(repo_names, per_page=20)
-                storage.set_cache(cache_key, json_mod.dumps(issues), hours=24)
-                sync_result = qm.sync_external_issues(issues)
-                result = {
-                    **sync_result,
-                    "from_cache": False,
-                    "repos_searched": len(repo_names),
-                    "issues_found": len(issues),
-                }
-        except GitHubClientError as e:
-            if json_output:
-                print(json.dumps({"error": str(e), "code": 1}))
-            else:
-                print(f"Error: {e}", file=sys.stderr)
-            raise typer.Exit(1)
 
     def _human(d):
         cache_str = " (from cache)" if d.get("from_cache") else ""
@@ -1631,6 +1515,35 @@ def quests_discover(
             print(f"  Found: {d['issues_found']} good-first-issue candidates")
         print(f"  Added: {d['added']} new quests")
         print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
+@quests_app.command("discover-all")
+def quests_discover_all(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Run every discovery source in one shot (scan-todos, scan-skillvault, beacon gaps, sync-issues, discover)."""
+    from src.quest_discovery import run_all
+
+    result = run_all()
+
+    def _human(d):
+        label = {"ok": "[ok]  ", "skipped": "[skip]", "error": "[err] "}
+        print("Quest discovery (all sources):")
+        for src in d["sources"]:
+            tag = label.get(src["status"], "[?]   ")
+            added = src.get("added", 0)
+            skipped = src.get("skipped", 0)
+            line = f"  {tag} {src['name']:<18} added={added:<3} skipped={skipped}"
+            if src["status"] != "ok" and src.get("error"):
+                line += f"  ({src['error']})"
+            print(line)
+        print()
+        print(f"  Total added:   {d['total_added']}")
+        print(f"  Total skipped: {d['total_skipped']}")
+        if d["total_errors"]:
+            print(f"  Errors:        {d['total_errors']}")
 
     _output(result, json_output, _human)
 

@@ -49,6 +49,7 @@ code-daily quests sync-issues [--json]
 code-daily quests scan-todos [--json]
 code-daily quests scan-skillvault [--json]
 code-daily quests discover [--json]
+code-daily quests discover-all [--json]
 code-daily quests enhance QUEST_ID [--json]
 code-daily quests enhance-batch [--json] [--limit INT]
 code-daily quests ai-status [--json]
@@ -92,6 +93,13 @@ Quests can be created from several sources, each with its own sync command:
 - `quests discover` — external good-first-issue candidates from starred GitHub repos
 
 All four are deduped via `(source, source_ref)` so they're safe to re-run.
+
+`quests discover-all` runs every source above (plus `sync-beacon-gaps`) in one
+shot, local-only first then network-bound. Per-source failures are contained:
+a missing binary or a bad GitHub token shows up as `[skip]` or `[err]` in the
+per-source line while the rest of the batch keeps going. Returns aggregated
+totals plus a `sources` array. Helper logic lives in `src/quest_discovery.py`
+and is shared by the five single-source commands.
 
 ## Agent Workflow: Themed News Digest
 
