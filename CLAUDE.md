@@ -65,6 +65,8 @@ code-daily scaffold justfile [PROJECT_PATH] [--json] [--dry-run] [--force]
 code-daily cron [--install] [--uninstall]
 code-daily routines plan [--json]
 code-daily routines export [--json] [--output PATH]
+code-daily portfolio sweep [--root PATH] [--json] [--dry-run]
+code-daily portfolio history [--project NAME] [--days INT] [--json]
 ```
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).
@@ -82,6 +84,26 @@ Routines (cloud-hosted scheduled tasks, launched April 2026). Statuses:
 Classification rules live in `src/routines_migrator.py:COMMAND_RULES`. Add a
 rule there whenever a new recurring command is introduced so the migration
 report stays accurate. Routines docs: <https://code.claude.com/docs/en/web-scheduled-tasks>.
+
+## Portfolio Sweep
+
+`code-daily portfolio sweep` shells out to `agent-ready score --root ~/projects`
+and (best-effort) `portfolio-audit list`, merges the two per project path, and
+persists one row per project into the `portfolio_snapshots` table. Each run
+diffs against the previous snapshot per project so the JSON output contains a
+`changes` array — that's the "moved 5 repos from C to A in 30 days" feed.
+
+Binary resolution order:
+
+1. `$CODE_DAILY_AGENT_READY_BIN` / `$CODE_DAILY_PORTFOLIO_AUDIT_BIN`
+2. `shutil.which(...)` on PATH
+3. Per-project venvs at `~/projects/{agent-ready,portfolio-audit}/.venv/bin/...`
+
+`agent-ready` missing is a hard error. `portfolio-audit` missing degrades to
+a warning — activity fields (`days_since_last_commit`, `commits_30d`,
+`has_cli`) become null but scoring continues. `--dry-run` skips persistence.
+
+Read back with `code-daily portfolio history [--project NAME] [--days INT]`.
 
 ## Quest Discovery Sources
 

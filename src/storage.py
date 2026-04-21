@@ -219,6 +219,25 @@ class CommitStorage:
                 fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                project_path TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                categories_json TEXT NOT NULL,
+                days_since_last_commit INTEGER,
+                commits_30d INTEGER,
+                has_cli INTEGER,
+                raw_json TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pf_path_time
+                ON portfolio_snapshots(project_path, captured_at)
+        """)
         self._commit_and_sync(conn)
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -970,6 +989,123 @@ class CommitStorage:
         )
         self._commit_and_sync(conn)
         return cursor.rowcount
+
+    def save_portfolio_snapshot(self, captured_at: str, projects: list[dict]) -> int:
+        """Persist a batch of per-project portfolio snapshots.
+
+        Args:
+            captured_at: ISO8601 UTC timestamp shared by every row in this sweep.
+            projects: List of merged project dicts. Each must have `name`, `path`,
+                `grade`, `score`, `categories`, and `raw`. Activity fields
+                (`days_since_last_commit`, `commits_30d`, `has_cli`) are optional.
+
+        Returns:
+            Number of rows inserted.
+        """
+        import json as _json
+
+        conn = self._get_connection()
+        inserted = 0
+        for p in projects:
+            cursor = conn.execute(
+                """
+                INSERT INTO portfolio_snapshots (
+                    captured_at, project_name, project_path, grade, score,
+                    categories_json, days_since_last_commit, commits_30d,
+                    has_cli, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    captured_at,
+                    p["name"],
+                    p["path"],
+                    p["grade"],
+                    int(p["score"]),
+                    _json.dumps(p.get("categories") or {}),
+                    p.get("days_since_last_commit"),
+                    p.get("commits_30d"),
+                    1 if p.get("has_cli") else (0 if p.get("has_cli") is False else None),
+                    _json.dumps(p.get("raw") or {}),
+                ),
+            )
+            inserted += cursor.rowcount
+        self._commit_and_sync(conn)
+        return inserted
+
+    def get_latest_per_project(self, before: str | None = None) -> dict[str, dict]:
+        """Return the most recent snapshot per project_path.
+
+        Args:
+            before: If set, restrict to snapshots strictly older than this
+                ISO8601 timestamp. Used to find the "prior" snapshot during
+                a diff.
+
+        Returns:
+            Mapping of project_path to the snapshot row dict.
+        """
+        conn = self._get_connection()
+        if before is None:
+            cursor = conn.execute(
+                """
+                SELECT ps.*
+                FROM portfolio_snapshots ps
+                JOIN (
+                    SELECT project_path, MAX(captured_at) AS mx
+                    FROM portfolio_snapshots
+                    GROUP BY project_path
+                ) latest
+                  ON ps.project_path = latest.project_path
+                 AND ps.captured_at = latest.mx
+                """
+            )
+        else:
+            cursor = conn.execute(
+                """
+                SELECT ps.*
+                FROM portfolio_snapshots ps
+                JOIN (
+                    SELECT project_path, MAX(captured_at) AS mx
+                    FROM portfolio_snapshots
+                    WHERE captured_at < ?
+                    GROUP BY project_path
+                ) latest
+                  ON ps.project_path = latest.project_path
+                 AND ps.captured_at = latest.mx
+                """,
+                (before,),
+            )
+        rows = self._fetchall_as_dicts(cursor)
+        return {row["project_path"]: row for row in rows}
+
+    def get_project_history(
+        self,
+        project_name: str | None = None,
+        since: str | None = None,
+    ) -> list[dict]:
+        """Return portfolio snapshots in chronological order.
+
+        Args:
+            project_name: Optional exact-match filter on project_name.
+            since: Optional ISO8601 timestamp lower bound (inclusive).
+
+        Returns:
+            List of snapshot dicts ordered by captured_at ascending.
+        """
+        where = []
+        params: list = []
+        if project_name is not None:
+            where.append("project_name = ?")
+            params.append(project_name)
+        if since is not None:
+            where.append("captured_at >= ?")
+            params.append(since)
+        sql = "SELECT * FROM portfolio_snapshots"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY captured_at ASC, project_name ASC"
+        conn = self._get_connection()
+        cursor = conn.execute(sql, params)
+        return self._fetchall_as_dicts(cursor)
 
 
 def get_commit_events_with_history(

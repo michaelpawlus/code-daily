@@ -1828,6 +1828,132 @@ def scaffold_justfile_cmd(
 
 
 # ---------------------------------------------------------------------------
+# portfolio subcommands
+# ---------------------------------------------------------------------------
+
+portfolio_app = typer.Typer(help="Portfolio sweep & grade history")
+app.add_typer(portfolio_app, name="portfolio")
+
+
+@portfolio_app.command("sweep")
+def portfolio_sweep_cmd(
+    root: str = typer.Option(
+        None,
+        "--root",
+        help="Directory to scan. Defaults to ~/projects.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Compute and print without persisting"
+    ),
+):
+    """Score every project and persist a grade snapshot."""
+    from src.portfolio_sweep import DEFAULT_ROOT, PortfolioSweepError, run_sweep
+
+    try:
+        result = run_sweep(root=root or DEFAULT_ROOT, persist=not dry_run)
+    except PortfolioSweepError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    def _human(d):
+        for w in d.get("warnings", []):
+            print(f"warning: {w}", file=sys.stderr)
+        dist = d["grade_distribution"]
+        dist_str = "  ".join(f"{g}:{dist[g]}" for g in ("A", "B", "C", "D", "F"))
+        print(f"Swept {d['project_count']} projects at {d['captured_at']}")
+        print(f"  root: {d['root']}")
+        print(f"  grades: {dist_str}")
+        if d["persisted"]:
+            print(f"  persisted: yes")
+        else:
+            print(f"  persisted: no (dry-run)")
+
+        real_changes = [c for c in d["changes"] if c["direction"] != "new"]
+        if real_changes:
+            print(f"\nChanges since last sweep ({len(real_changes)}):")
+            for c in real_changes:
+                arrow = "↑" if c["direction"] == "up" else ("↓" if c["direction"] == "down" else "→")
+                delta = f"{c['score_delta']:+d}" if c["score_delta"] is not None else "?"
+                days = (
+                    f" ({c['days_since_previous']}d ago)"
+                    if c["days_since_previous"] is not None
+                    else ""
+                )
+                print(
+                    f"  {arrow} {c['name']}: {c['grade_from']}→{c['grade_to']} "
+                    f"(score {c['score_from']}→{c['score_to']}, {delta}){days}"
+                )
+        else:
+            new_count = sum(1 for c in d["changes"] if c["direction"] == "new")
+            if new_count == d["project_count"]:
+                print("\nFirst sweep — no prior snapshots to diff against.")
+            else:
+                print("\nNo grade or score changes since last sweep.")
+
+    _output(result, json_output, _human)
+
+
+@portfolio_app.command("history")
+def portfolio_history_cmd(
+    project: Optional[str] = typer.Option(
+        None, "--project", help="Filter to one project by name"
+    ),
+    days: int = typer.Option(
+        30, "--days", help="Look back this many days"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show grade/score history from persisted sweeps."""
+    from datetime import datetime, timedelta, timezone
+
+    from src.storage import CommitStorage
+
+    since_dt = datetime.now(timezone.utc) - timedelta(days=days)
+    since = since_dt.isoformat(timespec="seconds")
+
+    storage = CommitStorage()
+    rows = storage.get_project_history(project_name=project, since=since)
+
+    data = {
+        "since": since,
+        "days": days,
+        "project_filter": project,
+        "row_count": len(rows),
+        "snapshots": [
+            {
+                "captured_at": r["captured_at"],
+                "project_name": r["project_name"],
+                "project_path": r["project_path"],
+                "grade": r["grade"],
+                "score": r["score"],
+                "days_since_last_commit": r["days_since_last_commit"],
+                "commits_30d": r["commits_30d"],
+            }
+            for r in rows
+        ],
+    }
+
+    def _human(d):
+        if not d["snapshots"]:
+            scope = f"project={d['project_filter']} " if d["project_filter"] else ""
+            print(f"No snapshots in the last {d['days']} days {scope}".rstrip())
+            return
+        scope = f" for {d['project_filter']}" if d["project_filter"] else ""
+        print(f"{d['row_count']} snapshots in the last {d['days']} days{scope}:")
+        for s in d["snapshots"]:
+            print(
+                f"  {s['captured_at']}  {s['project_name']:<28s}  "
+                f"{s['grade']}  score={s['score']}"
+            )
+
+    _output(data, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
 # Typer entry point
 # ---------------------------------------------------------------------------
 
