@@ -54,7 +54,7 @@ code-daily quests enhance QUEST_ID [--json]
 code-daily quests enhance-batch [--json] [--limit INT]
 code-daily quests ai-status [--json]
 code-daily achievements list [--json] [--category TEXT]
-code-daily dashboard [--json]
+code-daily dashboard [--json] [--since INT]
 code-daily check LEVEL [--dry-run] [--json]
 code-daily news digest [--json] [--sources TEXT] [--hours INT] [--limit INT] [--no-write]
 code-daily news trends [--json] [--days INT]
@@ -104,6 +104,15 @@ a warning — activity fields (`days_since_last_commit`, `commits_30d`,
 `has_cli`) become null but scoring continues. `--dry-run` skips persistence.
 
 Read back with `code-daily portfolio history [--project NAME] [--days INT]`.
+
+`code-daily dashboard` also surfaces a "Portfolio Activation Health" panel
+underneath the streak — current grade distribution, movement counts vs the
+baseline snapshot, top movers up/down, and a stale-projects list (any project
+whose latest snapshot reports `days_since_last_commit >= 30`). The panel's
+lookback window is controlled by `--since DAYS` (default 30); the baseline is
+the most recent snapshot per project strictly older than that cutoff. JSON
+output exposes the same data under the top-level `portfolio_activation` key.
+Logic lives in `src/portfolio_activation.py`.
 
 ## Quest Discovery Sources
 

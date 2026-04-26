@@ -674,14 +674,24 @@ def _obsidian_reason(item, score: int) -> str:
 @app.command()
 def dashboard(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    since: int = typer.Option(
+        30,
+        "--since",
+        help="Look back this many days for the portfolio activation panel.",
+    ),
 ):
-    """Display streak dashboard (original default behavior)."""
+    """Display streak dashboard plus portfolio activation health panel."""
     from src.main import _run_dashboard
+    from src.portfolio_activation import (
+        compute_activation_health,
+        render_activation_health,
+    )
+    from src.storage import CommitStorage
 
     if json_output:
         from src.config import GITHUB_TOKEN, GITHUB_USERNAME, validate_config
         from src.github_client import GitHubClient
-        from src.storage import CommitStorage, get_commit_events_with_history
+        from src.storage import get_commit_events_with_history
         from src.streak_calculator import calculate_streak
         from src.stats_calculator import calculate_stats
 
@@ -699,16 +709,22 @@ def dashboard(
             commit_events = get_commit_events_with_history(client, storage)
             streak_info = calculate_streak(commit_events) if commit_events else {}
             stats = calculate_stats(commit_events) if commit_events else {}
+            activation = compute_activation_health(storage, days=since)
             print(json.dumps({
                 "streak": streak_info,
                 "stats": stats,
                 "commit_count": len(commit_events),
+                "portfolio_activation": activation,
             }, default=str))
         except GitHubClientError as e:
             print(json.dumps({"error": str(e), "code": 1}))
             raise typer.Exit(1)
     else:
         result = _run_dashboard()
+        # Always render the portfolio panel, even if streak fetch failed.
+        storage = CommitStorage()
+        activation = compute_activation_health(storage, days=since)
+        render_activation_health(activation)
         if result:
             raise typer.Exit(result)
 
