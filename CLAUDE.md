@@ -71,6 +71,10 @@ code-daily portfolio history [--project NAME] [--days INT] [--json]
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).
 
+## Obsidian as the Universal Output Target
+
+Vault writes go through **`oj`** (`obsidian_journal`) — see `~/projects/obsidian_journal/CLAUDE.md`. Use `oj --json journal -t reading -q "..."` for capture and `oj --json plan -q "..."` for time-blocked planning so frontmatter, folder routing, and filename conventions stay in one place. Don't write directly under `$OBSIDIAN_VAULT_PATH`.
+
 ## Claude Code Routines Migration
 
 `code-daily routines plan` / `code-daily routines export` classify your current
