@@ -136,6 +136,14 @@ per-source line while the rest of the batch keeps going. Returns aggregated
 totals plus a `sources` array. Helper logic lives in `src/quest_discovery.py`
 and is shared by the five single-source commands.
 
+**beacon integration — `gaps export` not `gaps list`.** `sync-beacon-gaps`
+calls `beacon gaps export --json`, which emits quest-shaped dicts
+(`title`, `source`, `source_ref`, `description`) ready for the quest queue.
+Do **not** swap in `beacon gaps list --json` — that returns the v1 envelope
+`{"schema_version": 1, "gaps": [...]}` of raw gap rows, intended for analytical
+consumers like `stack-quest arcs suggest`. See beacon's CLAUDE.md "Gaps
+subcommand contract" for the full list/export distinction.
+
 ## Agent Workflow: Themed News Digest
 
 The `news digest` command collects raw items. Synthesis into a themed, curated digest is done by Claude Code in-session (not via API). The workflow:
