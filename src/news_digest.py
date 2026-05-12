@@ -1,18 +1,26 @@
 """
 Orchestrator for AI news digest: collects from multiple sources,
 deduplicates, and writes a formatted digest to the Obsidian vault.
+
+Vault writes are routed through ``oj capture`` (see ``src/oj_client.py``)
+so ``obsidian_journal`` remains the household writer-of-record. The
+``_build_*`` helpers are pure functions that return the body markdown +
+frontmatter metadata and are independently unit-testable.
 """
 
 import os
 from dataclasses import asdict
 from datetime import date
 
+from src import oj_client
 from src.news_fetchers import (
     FetchResult,
     fetch_arxiv,
     fetch_hackernews,
     fetch_reddit,
 )
+
+_DIGEST_FOLDER = "ai-news"
 
 _FETCHERS = {
     "hackernews": fetch_hackernews,
@@ -72,30 +80,26 @@ def collect_news(
     }
 
 
-def write_digest_to_vault(vault_path: str, digest: dict) -> str:
-    """Write markdown digest to the Obsidian vault. Returns relative file path."""
+def _build_raw_digest(digest: dict) -> dict:
+    """Build the raw (pre-synthesis) digest artifact: body + oj metadata.
+
+    Returns a dict with keys ``title``, ``body``, ``folder``, ``date``,
+    ``tags``, ``extra`` — ready to hand to ``oj_client.capture(**artifact)``
+    (after popping any keys it doesn't accept).
+    """
     digest_date = digest["date"]
     source_names = sorted(digest["sources"].keys())
     items = digest["items"]
 
-    # Group items by source
     by_source: dict[str, list[dict]] = {}
     for item in items:
         by_source.setdefault(item["source"], []).append(item)
 
     lines = [
-        "---",
-        f"date: {digest_date}",
-        f"tags: [ai-news, digest, daily]",
-        f"sources: [{', '.join(source_names)}]",
-        f"total_items: {digest['total_count']}",
-        "---",
-        "",
         f"# AI News Digest — {digest_date}",
         "",
     ]
 
-    # Hacker News section
     if "hackernews" in by_source:
         lines.append("## Hacker News")
         lines.append("| Score | Title |")
@@ -105,7 +109,6 @@ def write_digest_to_vault(vault_path: str, digest: dict) -> str:
             lines.append(f"| {item['score']} | {title_link} |")
         lines.append("")
 
-    # Reddit section
     if "reddit" in by_source:
         lines.append("## Reddit")
         lines.append("| Score | Subreddit | Title |")
@@ -115,7 +118,6 @@ def write_digest_to_vault(vault_path: str, digest: dict) -> str:
             lines.append(f"| {item['score']} | {item.get('subreddit', '')} | {title_link} |")
         lines.append("")
 
-    # arXiv section
     if "arxiv" in by_source:
         lines.append("## arXiv")
         lines.append("| Title | Summary |")
@@ -126,29 +128,40 @@ def write_digest_to_vault(vault_path: str, digest: dict) -> str:
             lines.append(f"| {title_link} | {summary} |")
         lines.append("")
 
-    rel_path = f"ai-news/{digest_date}.md"
-    full_path = os.path.join(vault_path, rel_path)
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    return {
+        "title": digest_date,
+        "body": "\n".join(lines),
+        "folder": _DIGEST_FOLDER,
+        "date": digest_date,
+        "tags": ["ai-news", "digest", "daily"],
+        "extra": {
+            "sources": ", ".join(source_names),
+            "total_items": str(digest["total_count"]),
+        },
+    }
 
-    with open(full_path, "w") as f:
-        f.write("\n".join(lines))
 
-    return rel_path
+def write_digest_to_vault(vault_path: str, digest: dict) -> str:
+    """Write raw markdown digest to the Obsidian vault via ``oj capture``."""
+    artifact = _build_raw_digest(digest)
+    return oj_client.capture(
+        title=artifact["title"],
+        body=artifact["body"],
+        folder=artifact["folder"],
+        date=artifact["date"],
+        tags=artifact["tags"],
+        extra=artifact["extra"],
+        vault_path=vault_path,
+        overwrite=True,
+    )
 
 
-def write_synthesized_digest_to_vault(vault_path: str, digest: dict, synthesis: dict) -> str:
-    """Write themed synthesized digest to the Obsidian vault. Returns relative file path."""
+def _build_synthesized_digest(digest: dict, synthesis: dict) -> dict:
+    """Build the themed/synthesized digest artifact: body + oj metadata."""
     digest_date = digest["date"]
     source_names = sorted(digest["sources"].keys())
 
     lines = [
-        "---",
-        f"date: {digest_date}",
-        "tags: [ai-news, digest, daily, synthesized]",
-        f"sources: [{', '.join(source_names)}]",
-        f"total_items: {digest['total_count']}",
-        "---",
-        "",
         f"# AI News Digest — {digest_date}",
         "",
         "## Overview",
@@ -169,7 +182,6 @@ def write_synthesized_digest_to_vault(vault_path: str, digest: dict, synthesis: 
             score = item.get("score", 0)
             commentary = item.get("commentary", "")
 
-            # Build source/score tag
             meta_parts = []
             if source:
                 meta_parts.append(source.capitalize())
@@ -182,14 +194,32 @@ def write_synthesized_digest_to_vault(vault_path: str, digest: dict, synthesis: 
 
         lines.append("")
 
-    rel_path = f"ai-news/{digest_date}.md"
-    full_path = os.path.join(vault_path, rel_path)
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    return {
+        "title": digest_date,
+        "body": "\n".join(lines),
+        "folder": _DIGEST_FOLDER,
+        "date": digest_date,
+        "tags": ["ai-news", "digest", "daily", "synthesized"],
+        "extra": {
+            "sources": ", ".join(source_names),
+            "total_items": str(digest["total_count"]),
+        },
+    }
 
-    with open(full_path, "w") as f:
-        f.write("\n".join(lines))
 
-    return rel_path
+def write_synthesized_digest_to_vault(vault_path: str, digest: dict, synthesis: dict) -> str:
+    """Write themed synthesized digest to the Obsidian vault via ``oj capture``."""
+    artifact = _build_synthesized_digest(digest, synthesis)
+    return oj_client.capture(
+        title=artifact["title"],
+        body=artifact["body"],
+        folder=artifact["folder"],
+        date=artifact["date"],
+        tags=artifact["tags"],
+        extra=artifact["extra"],
+        vault_path=vault_path,
+        overwrite=True,
+    )
 
 
 def read_digest_from_vault(vault_path: str, digest_date: str | None = None) -> dict | None:
@@ -214,19 +244,20 @@ def read_digest_from_vault(vault_path: str, digest_date: str | None = None) -> d
     with open(file_path) as f:
         content = f.read()
 
-    # Parse frontmatter
+    # Parse frontmatter (handles both legacy flow-style `tags: [a, b]` and
+    # the block-style YAML that `oj capture` emits)
     frontmatter: dict = {}
     body = content
     fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
     if fm_match:
-        for line in fm_match.group(1).splitlines():
-            if ": " in line:
-                key, val = line.split(": ", 1)
-                frontmatter[key.strip()] = val.strip()
+        frontmatter = _parse_yaml_lite(fm_match.group(1))
         body = content[fm_match.end():]
 
-    # Check if this is a synthesized digest (has Overview section)
-    is_synthesized = "synthesized" in frontmatter.get("tags", "")
+    tags_value = frontmatter.get("tags", [])
+    if isinstance(tags_value, list):
+        is_synthesized = "synthesized" in tags_value
+    else:
+        is_synthesized = "synthesized" in str(tags_value)
 
     # Parse sections
     sections: list[dict] = []
@@ -306,3 +337,40 @@ def read_digest_from_vault(vault_path: str, digest_date: str | None = None) -> d
 def _escape_pipe(text: str) -> str:
     """Escape pipe characters for markdown tables."""
     return text.replace("|", "\\|")
+
+
+def _parse_yaml_lite(text: str) -> dict:
+    """Tiny YAML subset parser for the frontmatter shapes oj + legacy code emit.
+
+    Handles scalar values, single-quoted strings, flow-style lists
+    (``tags: [a, b]``), and block-style lists (``tags:\\n- a\\n- b``). Anything
+    else falls through as a raw string. Not a general-purpose YAML parser — just
+    enough for vault frontmatter round-trips.
+    """
+    out: dict = {}
+    current_list_key: str | None = None
+    for raw in text.splitlines():
+        if not raw.strip():
+            current_list_key = None
+            continue
+        if raw.startswith("- ") and current_list_key:
+            item = raw[2:].strip().strip("'\"")
+            out[current_list_key].append(item)
+            continue
+        if ":" not in raw:
+            current_list_key = None
+            continue
+        key, _, value = raw.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if not value:
+            out[key] = []
+            current_list_key = key
+            continue
+        current_list_key = None
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            out[key] = [p.strip() for p in inner.split(",") if p.strip()] if inner else []
+        else:
+            out[key] = value.strip("'\"")
+    return out

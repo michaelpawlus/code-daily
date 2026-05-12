@@ -85,8 +85,44 @@ def _get_user_interests() -> list[dict]:
         return []
 
 
+_IDEAS_FOLDER = "project-ideas"
+
+
+def _build_project_ideas(ideas: dict) -> dict:
+    """Build the news-informed ideas artifact: body + oj metadata."""
+    today = date.today().isoformat()
+    generated_from = ideas.get("generated_from", today)
+
+    lines = [
+        f"# News-Informed Project Ideas -- {today}",
+        "",
+    ]
+
+    for i, idea in enumerate(ideas.get("ideas", []), 1):
+        lines.extend([
+            f"## {i}. {idea.get('title', 'Untitled')}",
+            "",
+            idea.get("description", ""),
+            "",
+            f"**Why now:** {idea.get('why_now', '')}",
+            f"**Skills demonstrated:** {', '.join(idea.get('skills_demonstrated', []))}",
+            f"**Complexity:** {idea.get('complexity', 'unknown')}",
+            f"**Trending source:** {idea.get('trending_source', '')}",
+            "",
+        ])
+
+    return {
+        "title": today,
+        "body": "\n".join(lines),
+        "folder": _IDEAS_FOLDER,
+        "date": today,
+        "tags": ["project-idea", "news-informed", "daily"],
+        "extra": {"generated_from": generated_from},
+    }
+
+
 def write_project_ideas_to_vault(vault_path: str, ideas: dict) -> str:
-    """Write synthesized project ideas to the Obsidian vault.
+    """Write synthesized project ideas to the Obsidian vault via ``oj capture``.
 
     Args:
         vault_path: Path to the Obsidian vault root.
@@ -108,38 +144,16 @@ def write_project_ideas_to_vault(vault_path: str, ideas: dict) -> str:
     Returns:
         Relative vault path of the written file.
     """
-    today = date.today().isoformat()
-    generated_from = ideas.get("generated_from", today)
+    from src import oj_client
 
-    lines = [
-        "---",
-        f"date: {today}",
-        "tags: [project-idea, news-informed, daily]",
-        f"generated_from: {generated_from}",
-        "---",
-        "",
-        f"# News-Informed Project Ideas -- {today}",
-        "",
-    ]
-
-    for i, idea in enumerate(ideas.get("ideas", []), 1):
-        lines.extend([
-            f"## {i}. {idea.get('title', 'Untitled')}",
-            "",
-            idea.get("description", ""),
-            "",
-            f"**Why now:** {idea.get('why_now', '')}",
-            f"**Skills demonstrated:** {', '.join(idea.get('skills_demonstrated', []))}",
-            f"**Complexity:** {idea.get('complexity', 'unknown')}",
-            f"**Trending source:** {idea.get('trending_source', '')}",
-            "",
-        ])
-
-    rel_path = f"project-ideas/{today}.md"
-    full_path = os.path.join(vault_path, rel_path)
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-
-    with open(full_path, "w") as f:
-        f.write("\n".join(lines))
-
-    return rel_path
+    artifact = _build_project_ideas(ideas)
+    return oj_client.capture(
+        title=artifact["title"],
+        body=artifact["body"],
+        folder=artifact["folder"],
+        date=artifact["date"],
+        tags=artifact["tags"],
+        extra=artifact["extra"],
+        vault_path=vault_path,
+        overwrite=True,
+    )

@@ -6,7 +6,6 @@ by news_fetchers) and collects posts that signal pain points.  The raw data
 is structured for Claude Code to synthesize in-session.
 """
 
-import os
 import random
 import time
 from dataclasses import asdict, dataclass
@@ -168,39 +167,15 @@ def _is_problem_signal(post: RedditPost) -> bool:
     return False
 
 
-def write_reddit_scan_to_vault(vault_path: str, scan: dict, synthesis: dict) -> str:
-    """Write synthesized Reddit problem analysis to the Obsidian vault.
+_REDDIT_SCAN_FOLDER = "project-ideas"
 
-    Args:
-        vault_path: Path to the Obsidian vault root.
-        scan: Raw scan data from scan_subreddit_problems().
-        synthesis: Agent-synthesized analysis with structure:
-            {
-                "subreddit": str,
-                "problem_summary": str,
-                "evidence_posts": [{"title", "url", "comment_count"}],
-                "project_idea": {
-                    "title": str,
-                    "description": str,
-                    "why_build_it": str,
-                    "target_users": str,
-                    "skills_demonstrated": [str],
-                }
-            }
 
-    Returns:
-        Relative vault path of the written file.
-    """
+def _build_reddit_scan(scan: dict, synthesis: dict) -> dict:
+    """Build the reddit-scan artifact: body + oj metadata."""
     today = date.today().isoformat()
     subs = ", ".join(scan.get("subreddits_scanned", []))
 
     lines = [
-        "---",
-        f"date: {today}",
-        "tags: [project-idea, reddit-scan, community-problems]",
-        f"subreddits: [{subs}]",
-        "---",
-        "",
         f"# Reddit Community Problem Scan -- {today}",
         "",
         f"**Subreddits scanned:** {subs}",
@@ -235,11 +210,49 @@ def write_reddit_scan_to_vault(vault_path: str, scan: dict, synthesis: dict) -> 
         "",
     ])
 
-    rel_path = f"project-ideas/reddit-scan-{today}.md"
-    full_path = os.path.join(vault_path, rel_path)
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    return {
+        "title": f"reddit-scan-{today}",
+        "body": "\n".join(lines),
+        "folder": _REDDIT_SCAN_FOLDER,
+        "date": today,
+        "tags": ["project-idea", "reddit-scan", "community-problems"],
+        "extra": {"subreddits": subs},
+    }
 
-    with open(full_path, "w") as f:
-        f.write("\n".join(lines))
 
-    return rel_path
+def write_reddit_scan_to_vault(vault_path: str, scan: dict, synthesis: dict) -> str:
+    """Write synthesized Reddit problem analysis to the Obsidian vault via ``oj capture``.
+
+    Args:
+        vault_path: Path to the Obsidian vault root.
+        scan: Raw scan data from scan_subreddit_problems().
+        synthesis: Agent-synthesized analysis with structure:
+            {
+                "subreddit": str,
+                "problem_summary": str,
+                "evidence_posts": [{"title", "url", "comment_count"}],
+                "project_idea": {
+                    "title": str,
+                    "description": str,
+                    "why_build_it": str,
+                    "target_users": str,
+                    "skills_demonstrated": [str],
+                }
+            }
+
+    Returns:
+        Relative vault path of the written file.
+    """
+    from src import oj_client
+
+    artifact = _build_reddit_scan(scan, synthesis)
+    return oj_client.capture(
+        title=artifact["title"],
+        body=artifact["body"],
+        folder=artifact["folder"],
+        date=artifact["date"],
+        tags=artifact["tags"],
+        extra=artifact["extra"],
+        vault_path=vault_path,
+        overwrite=True,
+    )

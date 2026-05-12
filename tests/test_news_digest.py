@@ -105,8 +105,9 @@ def test_write_digest_to_vault(tmp_path):
     assert full_path.exists()
 
     content = full_path.read_text()
-    assert "date: 2026-03-16" in content
-    assert "tags: [ai-news, digest, daily]" in content
+    assert "date: '2026-03-16'" in content
+    # oj writes block-style YAML lists
+    assert "tags:\n- ai-news\n- digest\n- daily" in content
     assert "## Hacker News" in content
     assert "[Test Story](https://example.com)" in content
     assert "| 42 |" in content
@@ -194,8 +195,8 @@ def test_write_synthesized_digest_to_vault(tmp_path):
     assert full_path.exists()
 
     content = full_path.read_text()
-    assert "date: 2026-03-17" in content
-    assert "tags: [ai-news, digest, daily, synthesized]" in content
+    assert "date: '2026-03-17'" in content
+    assert "tags:\n- ai-news\n- digest\n- daily\n- synthesized" in content
     assert "## Overview" in content
     assert "Today was dominated by GPT-5" in content
     assert "## Industry & Labs" in content
