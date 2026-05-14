@@ -144,6 +144,33 @@ Do **not** swap in `beacon gaps list --json` — that returns the v1 envelope
 consumers like `stack-quest arcs suggest`. See beacon's CLAUDE.md "Gaps
 subcommand contract" for the full list/export distinction.
 
+## Agent Workflow: Codebase Audit + Project Hubs
+
+The nightly `/newsandideas` pipeline delegates a codebase enhancement audit to
+a sub-agent. The agent must return a markdown list where **every bullet leads
+with an Obsidian wiki-link** to the project name (e.g. `- [[conductor]] add
+...`). The orchestrator then writes the result via:
+
+```python
+from src.codebase_audit import write_codebase_audit_to_vault
+result = write_codebase_audit_to_vault(vault_path, audit_body)
+```
+
+This does two things:
+
+1. Captures the body to `Project Ideas/codebase-enhancements-{date}.md` (same-day
+   re-runs overwrite — no `-2.md` collisions).
+2. For every `[[name]]` link target, creates a one-line stub at
+   `projects/{slug}.md` if one doesn't exist yet. The stub exists only to
+   resolve the link cleanly so Obsidian's backlinks panel can aggregate every
+   audit/spec/idea that mentions a given project. Stubs are tagged
+   `project-hub`.
+
+Returns a dict with `audit_path`, `audit_absolute_path` (paste-friendly),
+`linked_projects` (everything backlinked this run), and `new_stubs` (hubs
+created this run — surface these to the user so they know what's new).
+Logic lives in `src/codebase_audit.py`.
+
 ## Agent Workflow: Themed News Digest
 
 The `news digest` command collects raw items. Synthesis into a themed, curated digest is done by Claude Code in-session (not via API). The workflow:
