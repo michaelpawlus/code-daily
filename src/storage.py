@@ -238,6 +238,24 @@ class CommitStorage:
             CREATE INDEX IF NOT EXISTS idx_pf_path_time
                 ON portfolio_snapshots(project_path, captured_at)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS launchpad_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                project_path TEXT NOT NULL,
+                version TEXT,
+                grade TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                days_since_last_commit INTEGER,
+                signals_json TEXT NOT NULL,
+                raw_json TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_lp_path_time
+                ON launchpad_snapshots(project_path, captured_at)
+        """)
         self._commit_and_sync(conn)
 
     def save_commits(self, commit_events: list[dict]) -> int:
@@ -1100,6 +1118,107 @@ class CommitStorage:
             where.append("captured_at >= ?")
             params.append(since)
         sql = "SELECT * FROM portfolio_snapshots"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY captured_at ASC, project_name ASC"
+        conn = self._get_connection()
+        cursor = conn.execute(sql, params)
+        return self._fetchall_as_dicts(cursor)
+
+    # -- launchpad ----------------------------------------------------------
+
+    def save_launchpad_snapshot(self, captured_at: str, projects: list[dict]) -> int:
+        """Persist one row per project into ``launchpad_snapshots``.
+
+        Args:
+            captured_at: ISO8601 UTC timestamp for the sweep.
+            projects: Scored project dicts from ``launchpad.score_project``.
+
+        Returns:
+            Number of rows inserted.
+        """
+        import json as _json
+
+        conn = self._get_connection()
+        inserted = 0
+        for p in projects:
+            cursor = conn.execute(
+                """
+                INSERT INTO launchpad_snapshots (
+                    captured_at, project_name, project_path, version,
+                    grade, score, days_since_last_commit,
+                    signals_json, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    captured_at,
+                    p["name"],
+                    p["path"],
+                    p.get("version"),
+                    p["grade"],
+                    int(p["score"]),
+                    p.get("days_since_last_commit"),
+                    _json.dumps(p.get("signals") or {}),
+                    _json.dumps(p),
+                ),
+            )
+            inserted += cursor.rowcount
+        self._commit_and_sync(conn)
+        return inserted
+
+    def get_latest_launchpad_per_project(
+        self, before: str | None = None
+    ) -> dict[str, dict]:
+        """Return the most recent launchpad snapshot per project_path."""
+        conn = self._get_connection()
+        if before is None:
+            cursor = conn.execute(
+                """
+                SELECT ls.*
+                FROM launchpad_snapshots ls
+                JOIN (
+                    SELECT project_path, MAX(captured_at) AS mx
+                    FROM launchpad_snapshots
+                    GROUP BY project_path
+                ) latest
+                  ON ls.project_path = latest.project_path
+                 AND ls.captured_at = latest.mx
+                """
+            )
+        else:
+            cursor = conn.execute(
+                """
+                SELECT ls.*
+                FROM launchpad_snapshots ls
+                JOIN (
+                    SELECT project_path, MAX(captured_at) AS mx
+                    FROM launchpad_snapshots
+                    WHERE captured_at < ?
+                    GROUP BY project_path
+                ) latest
+                  ON ls.project_path = latest.project_path
+                 AND ls.captured_at = latest.mx
+                """,
+                (before,),
+            )
+        rows = self._fetchall_as_dicts(cursor)
+        return {row["project_path"]: row for row in rows}
+
+    def get_launchpad_history(
+        self,
+        project_name: str | None = None,
+        since: str | None = None,
+    ) -> list[dict]:
+        """Return launchpad snapshots in chronological order, optionally filtered."""
+        where = []
+        params: list = []
+        if project_name is not None:
+            where.append("project_name = ?")
+            params.append(project_name)
+        if since is not None:
+            where.append("captured_at >= ?")
+            params.append(since)
+        sql = "SELECT * FROM launchpad_snapshots"
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY captured_at ASC, project_name ASC"

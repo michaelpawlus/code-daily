@@ -1970,6 +1970,189 @@ def portfolio_history_cmd(
 
 
 # ---------------------------------------------------------------------------
+# launchpad subcommands
+# ---------------------------------------------------------------------------
+
+launchpad_app = typer.Typer(help="Shippable-tool launch readiness sweep")
+app.add_typer(launchpad_app, name="launchpad")
+
+
+def _launchpad_grade_summary(d: dict) -> str:
+    dist = d["grade_distribution"]
+    return "  ".join(f"{g}:{dist[g]}" for g in ("A", "B", "C", "D", "F"))
+
+
+@launchpad_app.command("sweep")
+def launchpad_sweep_cmd(
+    root: str = typer.Option(
+        None,
+        "--root",
+        help="Directory to scan. Defaults to ~/projects.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Compute and print without persisting"
+    ),
+):
+    """Score every shippable project under root and persist a launch-readiness snapshot."""
+    from src.launchpad import DEFAULT_ROOT, LaunchpadError, run_sweep
+
+    try:
+        result = run_sweep(root=root or DEFAULT_ROOT, persist=not dry_run)
+    except LaunchpadError as e:
+        if json_output:
+            print(json.dumps({"error": str(e), "code": 1}))
+        else:
+            print(f"error: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+    def _human(d):
+        print(f"Swept {d['project_count']} shippables at {d['captured_at']}")
+        print(f"  root: {d['root']}")
+        print(f"  grades: {_launchpad_grade_summary(d)}")
+        print(f"  persisted: {'yes' if d['persisted'] else 'no (dry-run)'}")
+
+        real_changes = [c for c in d["changes"] if c["direction"] != "new"]
+        if real_changes:
+            print(f"\nChanges since last sweep ({len(real_changes)}):")
+            for c in real_changes:
+                arrow = "↑" if c["direction"] == "up" else ("↓" if c["direction"] == "down" else "→")
+                delta = f"{c['score_delta']:+d}" if c["score_delta"] is not None else "?"
+                days = (
+                    f" ({c['days_since_previous']}d ago)"
+                    if c["days_since_previous"] is not None
+                    else ""
+                )
+                print(
+                    f"  {arrow} {c['name']}: {c['grade_from']}→{c['grade_to']} "
+                    f"(score {c['score_from']}→{c['score_to']}, {delta}){days}"
+                )
+        else:
+            new_count = sum(1 for c in d["changes"] if c["direction"] == "new")
+            if new_count == d["project_count"]:
+                print("\nFirst sweep — no prior snapshots to diff against.")
+            else:
+                print("\nNo grade or score changes since last sweep.")
+
+        print("\nProjects:")
+        for p in sorted(d["projects"], key=lambda x: (-x["score"], x["name"])):
+            missing = ", ".join(p["missing_signals"]) if p["missing_signals"] else "—"
+            print(f"  {p['grade']}  {p['score']:>3}  {p['name']:<28s}  missing: {missing}")
+
+    _output(result, json_output, _human)
+
+
+@launchpad_app.command("history")
+def launchpad_history_cmd(
+    project: Optional[str] = typer.Option(
+        None, "--project", help="Filter to one project by name"
+    ),
+    days: int = typer.Option(
+        30, "--days", help="Look back this many days"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show launchpad grade/score history from persisted sweeps."""
+    from datetime import datetime, timedelta, timezone
+
+    from src.storage import CommitStorage
+
+    since_dt = datetime.now(timezone.utc) - timedelta(days=days)
+    since = since_dt.isoformat(timespec="seconds")
+
+    storage = CommitStorage()
+    rows = storage.get_launchpad_history(project_name=project, since=since)
+
+    data = {
+        "since": since,
+        "days": days,
+        "project_filter": project,
+        "row_count": len(rows),
+        "snapshots": [
+            {
+                "captured_at": r["captured_at"],
+                "project_name": r["project_name"],
+                "project_path": r["project_path"],
+                "version": r["version"],
+                "grade": r["grade"],
+                "score": r["score"],
+                "days_since_last_commit": r["days_since_last_commit"],
+            }
+            for r in rows
+        ],
+    }
+
+    def _human(d):
+        if not d["snapshots"]:
+            scope = f"project={d['project_filter']} " if d["project_filter"] else ""
+            print(f"No launchpad snapshots in the last {d['days']} days {scope}".rstrip())
+            return
+        scope = f" for {d['project_filter']}" if d["project_filter"] else ""
+        print(f"{d['row_count']} snapshots in the last {d['days']} days{scope}:")
+        for s in d["snapshots"]:
+            print(
+                f"  {s['captured_at']}  {s['project_name']:<28s}  "
+                f"{s['grade']}  score={s['score']}"
+            )
+
+    _output(data, json_output, _human)
+
+
+@launchpad_app.command("show")
+def launchpad_show_cmd(
+    name: str = typer.Argument(..., help="Project name to show details for"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show the most recent launchpad snapshot for one project, with full signal breakdown."""
+    import json as _json
+
+    from src.storage import CommitStorage
+
+    storage = CommitStorage()
+    latest = storage.get_latest_launchpad_per_project()
+    matches = [r for r in latest.values() if r["project_name"] == name]
+    if not matches:
+        if json_output:
+            print(_json.dumps({"error": f"no launchpad snapshot for {name!r}", "code": 2}))
+        else:
+            print(f"error: no launchpad snapshot for {name!r}", file=sys.stderr)
+        raise typer.Exit(2)
+
+    row = matches[0]
+    raw = _json.loads(row["raw_json"]) if row.get("raw_json") else {}
+    data = {
+        "name": row["project_name"],
+        "path": row["project_path"],
+        "version": row["version"],
+        "grade": row["grade"],
+        "score": row["score"],
+        "captured_at": row["captured_at"],
+        "days_since_last_commit": row["days_since_last_commit"],
+        "signals": _json.loads(row["signals_json"]) if row.get("signals_json") else {},
+        "missing_signals": raw.get("missing_signals") or [],
+        "scripts": raw.get("scripts") or [],
+        "readme_bytes": raw.get("readme_bytes"),
+    }
+
+    def _human(d):
+        print(f"{d['name']}  ({d['grade']}, score {d['score']})")
+        print(f"  path: {d['path']}")
+        if d["version"]:
+            print(f"  version: {d['version']}")
+        if d["scripts"]:
+            print(f"  scripts: {', '.join(d['scripts'])}")
+        if d["days_since_last_commit"] is not None:
+            print(f"  days since last commit: {d['days_since_last_commit']}")
+        if d["readme_bytes"] is not None:
+            print(f"  README: {d['readme_bytes']} bytes")
+        print(f"  signals (passing):")
+        for key, value in d["signals"].items():
+            print(f"    {'✓' if value else '✗'} {key}")
+
+    _output(data, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
 # Typer entry point
 # ---------------------------------------------------------------------------
 

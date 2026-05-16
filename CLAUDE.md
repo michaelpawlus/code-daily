@@ -67,6 +67,9 @@ code-daily routines plan [--json]
 code-daily routines export [--json] [--output PATH]
 code-daily portfolio sweep [--root PATH] [--json] [--dry-run]
 code-daily portfolio history [--project NAME] [--days INT] [--json]
+code-daily launchpad sweep [--root PATH] [--json] [--dry-run]
+code-daily launchpad history [--project NAME] [--days INT] [--json]
+code-daily launchpad show NAME [--json]
 ```
 
 All output commands support `--json` for agent orchestration (JSON to stdout, human text to stderr).
@@ -108,6 +111,34 @@ a warning — activity fields (`days_since_last_commit`, `commits_30d`,
 `has_cli`) become null but scoring continues. `--dry-run` skips persistence.
 
 Read back with `code-daily portfolio history [--project NAME] [--days INT]`.
+
+## Launchpad
+
+`code-daily launchpad sweep` scores every shippable Python tool under
+`~/projects` against a local-only readiness checklist (no network) and
+persists a snapshot to `launchpad_snapshots`. A "shippable" is any project
+with a `pyproject.toml` declaring at least one `[project.scripts]` entry —
+that filter is what separates a publishable CLI from a research notebook.
+
+Signals (weights total 100):
+
+- `has_readme` (10), `readme_substantial` ≥800 bytes (5),
+  `readme_has_install` (5), `readme_has_usage` (10)
+- `has_license` (10), `has_changelog` (10)
+- `has_tests` (15), `has_ci` GitHub Actions (15)
+- `has_recent_commit` ≤30 days (10), `has_cli_entry` (10)
+
+Grades: A ≥85, B ≥70, C ≥55, D ≥40, else F. Same diff/grade-distribution
+shape as `portfolio sweep` so the JSON outputs compose. Read back per-project
+detail with `launchpad show NAME` (full passing/missing signal breakdown)
+and longitudinal grade movement with `launchpad history`.
+
+Launchpad answers a different question than `portfolio sweep` — portfolio
+asks "is this project well-built?", launchpad asks "is this project
+shareable yet?". A project can be a high-quality A in portfolio terms
+(strong code, tests, agent-ready CLI) while still being a launchpad D
+because nobody outside this repo can find it. Logic lives in
+`src/launchpad.py`.
 
 `code-daily dashboard` also surfaces a "Portfolio Activation Health" panel
 underneath the streak — current grade distribution, movement counts vs the
