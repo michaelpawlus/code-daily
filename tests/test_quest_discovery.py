@@ -81,6 +81,64 @@ class TestRunAll:
         assert result["sources"][2]["status"] == "ok"
 
 
+class TestRunScanLaunchpad:
+    """Unit tests for quest_discovery.run_scan_launchpad()."""
+
+    @staticmethod
+    def _fake_project(name="proj", grade="D", score=45, path=None, missing=None):
+        return {
+            "name": name,
+            "grade": grade,
+            "score": score,
+            "path": path or f"/tmp/{name}",
+            "missing_signals": missing or ["has_license", "has_ci"],
+        }
+
+    def test_invalid_max_grade_returns_error_without_calling_sweep(self):
+        with patch("src.launchpad.run_sweep") as mock_sweep:
+            result = quest_discovery.run_scan_launchpad(max_grade="Z")
+
+        assert result["status"] == "error"
+        assert "invalid max_grade" in result["error"]
+        mock_sweep.assert_not_called()
+
+    def test_filters_by_threshold_and_does_not_persist(self):
+        projects = [
+            self._fake_project(name="alpha", grade="A", score=95),
+            self._fake_project(name="charlie", grade="C", score=60),
+            self._fake_project(name="delta", grade="D", score=45),
+            self._fake_project(name="foxtrot", grade="F", score=10),
+        ]
+        with patch(
+            "src.launchpad.run_sweep",
+            return_value={"projects": projects},
+        ) as mock_sweep, patch(
+            "src.quest_manager.QuestManager.sync_launchpad_low_grades",
+            return_value={"added": 2, "skipped": 0},
+        ) as mock_sync, patch("src.storage.CommitStorage"):
+            result = quest_discovery.run_scan_launchpad(max_grade="D")
+
+        # run_sweep must be called with persist=False so launchpad sweep stays
+        # the sole writer of snapshot rows.
+        assert mock_sweep.call_args.kwargs["persist"] is False
+        # Only the D and F projects should have been forwarded to the sync layer.
+        forwarded = mock_sync.call_args.args[0]
+        assert sorted(p["name"] for p in forwarded) == ["delta", "foxtrot"]
+        assert result["status"] == "ok"
+        assert result["scanned"] == 2
+        assert result["added"] == 2
+        assert result["max_grade"] == "D"
+
+    def test_launchpad_error_returns_error_status(self):
+        from src.launchpad import LaunchpadError
+
+        with patch("src.launchpad.run_sweep", side_effect=LaunchpadError("root missing")):
+            result = quest_discovery.run_scan_launchpad()
+
+        assert result["status"] == "error"
+        assert "root missing" in result["error"]
+
+
 class TestDiscoverAllCli:
     """CLI tests for `code-daily quests discover-all`."""
 

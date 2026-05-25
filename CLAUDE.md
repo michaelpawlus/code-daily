@@ -48,6 +48,7 @@ code-daily quests summary [--json]
 code-daily quests sync-issues [--json]
 code-daily quests scan-todos [--json]
 code-daily quests scan-skillvault [--json]
+code-daily quests scan-launchpad [--json] [--max-grade TEXT]
 code-daily quests discover [--json]
 code-daily quests discover-all [--json]
 code-daily quests enhance QUEST_ID [--json]
@@ -156,12 +157,14 @@ Quests can be created from several sources, each with its own sync command:
 - `quests sync-issues` — your own GitHub issues
 - `quests scan-todos` — TODO/FIXME comments in this repo's Python files
 - `quests scan-skillvault` — incomplete-work markers (TODO, "ready to build", "planned", "coming soon", etc.) surfaced from `skillvault`'s cross-project index of CLAUDE.md files, skill SKILL.md files, and specs. Requires `skillvault` on PATH (or installed at `~/projects/skillvault/.venv/bin/skillvault`); silently no-ops if absent. Run `skillvault scan` first to populate the index.
+- `quests scan-launchpad` — turn low-grade `launchpad sweep` projects into polish quests. One quest per project (not per missing signal — that would flood the queue); the description enumerates the missing readiness signals (`has_license`, `has_ci`, etc.). Threshold defaults to D and below (`--max-grade D`). Dedup key is the project path (`source_ref=launchpad:{path}`), so renames of the human-facing name don't cause duplicates. Calls `launchpad.run_sweep(persist=False)` — `launchpad sweep` remains the single writer of snapshot rows. Closes the activation loop: launchpad scores → low-grade quests → user polishes → next sweep grades the project up.
 - `quests discover` — external good-first-issue candidates from starred GitHub repos
 
-All four are deduped via `(source, source_ref)` so they're safe to re-run.
+All five are deduped via `(source, source_ref)` so they're safe to re-run.
 
 `quests discover-all` runs every source above (plus `sync-beacon-gaps`) in one
-shot, local-only first then network-bound. Per-source failures are contained:
+shot, local-only first (scan-todos, scan-skillvault, scan-launchpad) then
+network-bound (sync-beacon-gaps, sync-issues, discover). Per-source failures are contained:
 a missing binary or a bad GitHub token shows up as `[skip]` or `[err]` in the
 per-source line while the rest of the batch keeps going. Returns aggregated
 totals plus a `sources` array. Helper logic lives in `src/quest_discovery.py`

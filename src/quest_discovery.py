@@ -78,6 +78,39 @@ def run_scan_skillvault() -> dict:
     return {"status": status, **result}
 
 
+def run_scan_launchpad(max_grade: str = "D") -> dict:
+    """Scan launchpad scores for low-grade shippable projects and queue polish quests.
+
+    Calls ``launchpad.run_sweep(persist=False)`` so this scan never writes a
+    snapshot — ``launchpad sweep`` remains the single writer of snapshot rows.
+    One quest per low-grade project (not per missing signal) to avoid flooding
+    the queue; the description enumerates the missing signals.
+    """
+    from src.launchpad import _GRADE_ORDER, LaunchpadError, run_sweep
+    from src.quest_manager import QuestManager
+    from src.storage import CommitStorage
+
+    threshold = _GRADE_ORDER.get(max_grade.upper())
+    if threshold is None:
+        return {"status": "error", "added": 0, "skipped": 0,
+                "error": f"invalid max_grade {max_grade!r}; expected one of A-F"}
+
+    try:
+        sweep = run_sweep(persist=False)
+    except LaunchpadError as e:
+        return {"status": "error", "added": 0, "skipped": 0, "error": str(e)}
+
+    low_grade = [
+        p for p in sweep["projects"]
+        if _GRADE_ORDER.get(p["grade"], 0) <= threshold
+    ]
+
+    storage = CommitStorage()
+    qm = QuestManager(storage)
+    result = qm.sync_launchpad_low_grades(low_grade)
+    return {"status": "ok", "scanned": len(low_grade), "max_grade": max_grade.upper(), **result}
+
+
 def run_sync_beacon_gaps(limit: int = 10) -> dict:
     """Sync skill gaps from the beacon CLI."""
     from src.storage import CommitStorage
@@ -176,6 +209,7 @@ def run_discover() -> dict:
 DISCOVERY_SOURCES = [
     ("scan-todos", run_scan_todos),
     ("scan-skillvault", run_scan_skillvault),
+    ("scan-launchpad", run_scan_launchpad),
     ("sync-beacon-gaps", run_sync_beacon_gaps),
     ("sync-issues", run_sync_issues),
     ("discover", run_discover),

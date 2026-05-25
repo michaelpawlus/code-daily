@@ -788,6 +788,80 @@ class TestExternalIssuesSync:
         assert quests[0]["description"] is None
 
 
+class TestLaunchpadLowGradesSync:
+    """Tests for QuestManager.sync_launchpad_low_grades."""
+
+    def _proj(self, name="alida-sdk", grade="D", score=45,
+              path=None, missing=None):
+        return {
+            "name": name,
+            "grade": grade,
+            "score": score,
+            "path": path or f"/home/u/projects/{name}",
+            "missing_signals": ["has_license", "has_ci"] if missing is None else missing,
+        }
+
+    def test_creates_one_quest_per_project_with_signal_breakdown(self, quest_manager, storage):
+        result = quest_manager.sync_launchpad_low_grades([
+            self._proj(name="alida-sdk", grade="D", score=45,
+                       missing=["has_license", "has_ci", "readme_has_usage"]),
+            self._proj(name="ninjaclips", grade="F", score=35,
+                       missing=["has_readme", "has_license"]),
+        ])
+
+        assert result == {"added": 2, "skipped": 0}
+        quests = storage.get_quests()
+        assert len(quests) == 2
+
+        titles = {q["title"] for q in quests}
+        assert "[launchpad] Polish alida-sdk (D, 45/100)" in titles
+        assert "[launchpad] Polish ninjaclips (F, 35/100)" in titles
+
+        by_title = {q["title"]: q for q in quests}
+        ninjaclips = by_title["[launchpad] Polish ninjaclips (F, 35/100)"]
+        assert ninjaclips["source"] == "launchpad"
+        assert ninjaclips["source_ref"] == "launchpad:/home/u/projects/ninjaclips"
+        assert ninjaclips["description"] == "Missing signals: has_readme, has_license"
+
+    def test_dedup_by_project_path(self, quest_manager, storage):
+        storage.create_quest(
+            title="[launchpad] Polish alida-sdk (D, 45/100)",
+            source="launchpad",
+            source_ref="launchpad:/home/u/projects/alida-sdk",
+        )
+
+        result = quest_manager.sync_launchpad_low_grades([
+            self._proj(name="alida-sdk", path="/home/u/projects/alida-sdk"),
+            self._proj(name="dab-forge", path="/home/u/projects/dab-forge"),
+        ])
+
+        assert result == {"added": 1, "skipped": 1}
+        assert len(storage.get_quests()) == 2
+
+    def test_handles_empty_list_and_missing_signals(self, quest_manager, storage):
+        result = quest_manager.sync_launchpad_low_grades([])
+        assert result == {"added": 0, "skipped": 0}
+
+        # A project with no missing_signals (an A-grade slipped past, theoretically)
+        # should still create a quest, just with a null description.
+        result = quest_manager.sync_launchpad_low_grades([
+            self._proj(name="edge-case", grade="D", score=40, missing=[]),
+        ])
+        assert result == {"added": 1, "skipped": 0}
+        quests = storage.get_quests()
+        assert quests[0]["description"] is None
+
+    def test_skips_projects_without_a_path(self, quest_manager, storage):
+        # Path is the dedup identity — a project without one can't be tracked
+        # stably, so it should be silently dropped (not crash).
+        result = quest_manager.sync_launchpad_low_grades([
+            {"name": "ghost", "grade": "D", "score": 45, "path": "",
+             "missing_signals": ["has_license"]},
+        ])
+        assert result == {"added": 0, "skipped": 0}
+        assert storage.get_quests() == []
+
+
 class TestExternalCache:
     """Tests for external cache functionality."""
 

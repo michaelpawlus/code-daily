@@ -481,6 +481,45 @@ class QuestManager:
 
         return {"added": added, "skipped": skipped}
 
+    def sync_launchpad_low_grades(self, projects: list[dict]) -> dict:
+        """Sync low-grade launchpad projects into polish quests, skipping duplicates.
+
+        One quest per project; description enumerates the missing readiness
+        signals so the user knows what to fix when they pick it up. Dedup key
+        is the project path (stable across renames of the human-facing name).
+        """
+        added = 0
+        skipped = 0
+
+        for proj in projects:
+            path = proj.get("path") or ""
+            if not path:
+                continue
+            source_ref = f"launchpad:{path}"
+
+            if self.storage.quest_exists_by_source_ref("launchpad", source_ref):
+                skipped += 1
+                continue
+
+            title = f"[launchpad] Polish {proj['name']} ({proj['grade']}, {proj['score']}/100)"
+            if len(title) > 200:
+                title = title[:197] + "..."
+
+            missing = proj.get("missing_signals") or []
+            description = "Missing signals: " + ", ".join(missing) if missing else None
+            if description and len(description) > 500:
+                description = description[:497] + "..."
+
+            self.storage.create_quest(
+                title=title,
+                source="launchpad",
+                source_ref=source_ref,
+                description=description,
+            )
+            added += 1
+
+        return {"added": added, "skipped": skipped}
+
     def enhance_quest(self, quest_id: int) -> dict:
         """
         Enhance a quest with AI-generated description and difficulty.

@@ -601,6 +601,32 @@ class TestQuestsSync:
         assert data["skipped"] == 1
         assert data["scanned"] == 0
 
+    @patch("src.quest_manager.QuestManager.sync_launchpad_low_grades",
+           return_value={"added": 4, "skipped": 1})
+    @patch("src.launchpad.run_sweep", return_value={"projects": [
+        {"name": "alpha", "grade": "A", "score": 95, "path": "/p/alpha", "missing_signals": []},
+        {"name": "delta", "grade": "D", "score": 45, "path": "/p/delta", "missing_signals": ["has_ci"]},
+        {"name": "foxtrot", "grade": "F", "score": 20, "path": "/p/foxtrot", "missing_signals": ["has_readme"]},
+    ]})
+    @patch("src.storage.CommitStorage")
+    def test_scan_launchpad_json(self, mock_storage_cls, mock_sweep, mock_sync):
+        result = runner.invoke(app, ["quests", "scan-launchpad", "--json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["added"] == 4
+        assert data["skipped"] == 1
+        # Only D and F should have been forwarded to the sync layer.
+        forwarded = mock_sync.call_args.args[0]
+        assert sorted(p["name"] for p in forwarded) == ["delta", "foxtrot"]
+        assert data["scanned"] == 2
+        assert data["max_grade"] == "D"
+
+    def test_scan_launchpad_invalid_grade_exits_nonzero(self):
+        result = runner.invoke(app, ["quests", "scan-launchpad", "--max-grade", "Z", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "invalid max_grade" in data["error"]
+
 
 # ---------------------------------------------------------------------------
 # quests AI

@@ -1471,6 +1471,37 @@ def quests_scan_skillvault(
     _output(result, json_output, _human)
 
 
+@quests_app.command("scan-launchpad")
+def quests_scan_launchpad(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    max_grade: str = typer.Option(
+        "D", "--max-grade", "-g",
+        help="Include projects at or below this grade (A-F). Defaults to D.",
+    ),
+):
+    """Turn low-grade launchpad projects into polish quests (one quest per project)."""
+    from src.quest_discovery import run_scan_launchpad
+
+    result = run_scan_launchpad(max_grade=max_grade)
+
+    if result["status"] == "error":
+        err = result.get("error", "")
+        payload = {"error": err, "code": 1, "added": 0, "skipped": 0}
+        _output(payload, json_output, lambda d: print(f"Launchpad scan error: {err}"))
+        raise typer.Exit(1)
+
+    def _human(d):
+        if d["scanned"] == 0:
+            print(f"Launchpad scan complete: no projects at or below grade {d['max_grade']}.")
+            return
+        print(f"Launchpad scan complete (threshold: {d['max_grade']}):")
+        print(f"  Low-grade projects: {d['scanned']}")
+        print(f"  Added: {d['added']} new quests")
+        print(f"  Skipped: {d['skipped']} (already synced)")
+
+    _output(result, json_output, _human)
+
+
 @quests_app.command("sync-beacon-gaps")
 def quests_sync_beacon_gaps(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
@@ -1539,7 +1570,7 @@ def quests_discover(
 def quests_discover_all(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
-    """Run every discovery source in one shot (scan-todos, scan-skillvault, beacon gaps, sync-issues, discover)."""
+    """Run every discovery source in one shot (scan-todos, scan-skillvault, scan-launchpad, beacon gaps, sync-issues, discover)."""
     from src.quest_discovery import run_all
 
     result = run_all()
