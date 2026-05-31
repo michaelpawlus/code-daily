@@ -824,3 +824,95 @@ class TestIdeasSync:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["added"] == 2
+
+
+# ---------------------------------------------------------------------------
+# circleback
+# ---------------------------------------------------------------------------
+
+
+class TestCircleBack:
+    @pytest.fixture(autouse=True)
+    def _tmp_db(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CODE_DAILY_DB_PATH", str(tmp_path / "cb.db"))
+        monkeypatch.delenv("TURSO_DATABASE_URL", raising=False)
+
+    def test_add_and_list_json(self):
+        result = runner.invoke(
+            app,
+            ["circleback", "add", "Revisit caching", "--kind", "continue",
+             "--priority", "high", "--json"],
+        )
+        assert result.exit_code == 0
+        item = json.loads(result.output)["item"]
+        assert item["content"] == "Revisit caching"
+        assert item["priority"] == 1
+        assert item["kind"] == "continue"
+
+        result = runner.invoke(app, ["circleback", "list", "--json"])
+        assert result.exit_code == 0
+        items = json.loads(result.output)["items"]
+        assert len(items) == 1
+
+    def test_add_invalid_kind_exits(self):
+        result = runner.invoke(
+            app, ["circleback", "add", "x", "--kind", "bogus", "--json"]
+        )
+        assert result.exit_code == 2
+        assert "error" in json.loads(result.output)
+
+    def test_due_excludes_future_snoozed(self):
+        runner.invoke(app, ["circleback", "add", "now-item", "--json"])
+        runner.invoke(
+            app, ["circleback", "add", "later", "--date", "2099-01-01", "--json"]
+        )
+        result = runner.invoke(app, ["circleback", "due", "--json"])
+        data = json.loads(result.output)
+        assert [i["content"] for i in data["due"]] == ["now-item"]
+        assert data["upcoming_count"] == 1
+
+    def test_done_transitions(self):
+        add = runner.invoke(app, ["circleback", "add", "x", "--json"])
+        item_id = json.loads(add.output)["item"]["id"]
+        result = runner.invoke(app, ["circleback", "done", str(item_id), "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["status"] == "done"
+        # no longer in open list
+        lst = runner.invoke(app, ["circleback", "list", "--json"])
+        assert json.loads(lst.output)["items"] == []
+
+    def test_done_missing_exits(self):
+        result = runner.invoke(app, ["circleback", "done", "999", "--json"])
+        assert result.exit_code == 2
+
+    def test_snooze(self):
+        add = runner.invoke(app, ["circleback", "add", "x", "--json"])
+        item_id = json.loads(add.output)["item"]["id"]
+        result = runner.invoke(
+            app, ["circleback", "snooze", str(item_id), "2099-05-05", "--json"]
+        )
+        assert result.exit_code == 0
+        assert json.loads(result.output)["item"]["circle_back_date"] == "2099-05-05"
+
+    def test_context_command(self):
+        runner.invoke(
+            app,
+            ["circleback", "add", "important", "--priority", "high", "--json"],
+        )
+        result = runner.invoke(app, ["circleback", "context", "--json"])
+        data = json.loads(result.output)
+        assert data["due_count"] == 1
+        assert "high-priority" in data["summary"]
+
+    def test_promote_to_issue(self):
+        add = runner.invoke(app, ["circleback", "add", "ship", "--json"])
+        item_id = json.loads(add.output)["item"]["id"]
+        fake = {"created": True, "url": "https://github.com/o/r/issues/3"}
+        with patch("src.gh_issues.create_issue", return_value=fake):
+            result = runner.invoke(
+                app,
+                ["circleback", "promote-to-issue", str(item_id), "--repo", "o/r",
+                 "--json"],
+            )
+        assert result.exit_code == 0
+        assert json.loads(result.output)["issue_url"].endswith("/issues/3")
