@@ -170,6 +170,33 @@ class CommitStorage:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS circleback_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                note TEXT,
+                kind TEXT DEFAULT 'idea',
+                priority INTEGER DEFAULT 2,
+                circle_back_date TEXT,
+                status TEXT DEFAULT 'open',
+                source TEXT DEFAULT 'manual',
+                source_ref TEXT,
+                issue_url TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_circleback_status ON circleback_items(status)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_circleback_date
+            ON circleback_items(circle_back_date)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_circleback_source_ref
+            ON circleback_items(source, source_ref)
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS external_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cache_key TEXT UNIQUE NOT NULL,
@@ -803,6 +830,185 @@ class CommitStorage:
         """
         conn = self._get_connection()
         cursor = conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
+
+    # Circle-back methods
+    def create_circleback_item(
+        self,
+        content: str,
+        kind: str = "idea",
+        priority: int = 2,
+        circle_back_date: str | None = None,
+        note: str | None = None,
+        source: str = "manual",
+        source_ref: str | None = None,
+    ) -> int:
+        """
+        Create a new circle-back item (an earmarked thing to revisit later).
+
+        Args:
+            content: Short description of what to circle back to.
+            kind: One of 'continue' (work started), 'project' (new project), 'idea'.
+            priority: 1 (high), 2 (medium), 3 (low). Signals importance to the agent.
+            circle_back_date: Optional YYYY-MM-DD snooze-until date.
+            note: Optional longer context/note.
+            source: Where it came from ('manual', 'newsandideas', etc.).
+            source_ref: Reference for deduplication of synced sources.
+
+        Returns:
+            ID of the created item.
+        """
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            INSERT INTO circleback_items
+                (content, note, kind, priority, circle_back_date, source, source_ref)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (content, note, kind, priority, circle_back_date, source, source_ref),
+        )
+        self._commit_and_sync(conn)
+        return cursor.lastrowid
+
+    def get_circleback_items(
+        self, status: str | None = None, kind: str | None = None
+    ) -> list[dict]:
+        """
+        Get circle-back items, optionally filtered by status and/or kind.
+
+        Items are ordered so the most pressing surface first: by priority
+        ascending (1 = high) then by circle_back_date (soonest first, undated
+        last) then by recency.
+
+        Args:
+            status: Filter by status ('open', 'done', 'promoted', 'dropped').
+            kind: Filter by kind ('continue', 'project', 'idea').
+
+        Returns:
+            List of circle-back item dictionaries.
+        """
+        conn = self._get_connection()
+        query = "SELECT * FROM circleback_items"
+        clauses: list[str] = []
+        params: list = []
+
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if kind:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+
+        # NULL dates sort last; SQLite sorts NULL first by default, so coalesce.
+        query += (
+            " ORDER BY priority ASC,"
+            " COALESCE(circle_back_date, '9999-12-31') ASC,"
+            " created_at DESC"
+        )
+
+        cursor = conn.execute(query, params)
+        return self._fetchall_as_dicts(cursor)
+
+    def get_circleback_item(self, item_id: int) -> dict | None:
+        """Get a single circle-back item by ID, or None if not found."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "SELECT * FROM circleback_items WHERE id = ?",
+            (item_id,),
+        )
+        return self._fetchone_as_dict(cursor)
+
+    def update_circleback_status(self, item_id: int, status: str) -> bool:
+        """Update a circle-back item's status. Returns True if a row changed."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            UPDATE circleback_items
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, item_id),
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
+
+    def update_circleback_fields(
+        self,
+        item_id: int,
+        priority: int | None = None,
+        circle_back_date: str | None = None,
+        note: str | None = None,
+    ) -> bool:
+        """
+        Update mutable fields on a circle-back item (priority, date, note).
+
+        Only the fields passed (non-None) are updated. To explicitly clear a
+        date, pass the empty string.
+
+        Returns:
+            True if a row was updated, False if not found or nothing to update.
+        """
+        sets: list[str] = []
+        params: list = []
+        if priority is not None:
+            sets.append("priority = ?")
+            params.append(priority)
+        if circle_back_date is not None:
+            sets.append("circle_back_date = ?")
+            params.append(circle_back_date or None)
+        if note is not None:
+            sets.append("note = ?")
+            params.append(note)
+        if not sets:
+            return False
+
+        sets.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(item_id)
+        conn = self._get_connection()
+        cursor = conn.execute(
+            f"UPDATE circleback_items SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
+
+    def set_circleback_issue(self, item_id: int, issue_url: str) -> bool:
+        """Record the GitHub issue URL an item was promoted into."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            UPDATE circleback_items
+            SET issue_url = ?, status = 'promoted', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (issue_url, item_id),
+        )
+        self._commit_and_sync(conn)
+        return cursor.rowcount > 0
+
+    def circleback_exists_by_source_ref(self, source: str, source_ref: str) -> bool:
+        """
+        Check whether a circle-back item with this source/source_ref exists.
+
+        Used to dedupe items captured from automated sources so re-running a
+        pipeline doesn't create duplicates.
+        """
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT 1 FROM circleback_items WHERE source = ? AND source_ref = ? LIMIT 1",
+            (source, source_ref),
+        ).fetchone()
+        return row is not None
+
+    def delete_circleback_item(self, item_id: int) -> bool:
+        """Delete a circle-back item. Returns True if a row was removed."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            "DELETE FROM circleback_items WHERE id = ?", (item_id,)
+        )
         self._commit_and_sync(conn)
         return cursor.rowcount > 0
 

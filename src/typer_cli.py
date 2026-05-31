@@ -21,6 +21,7 @@ notify_app = typer.Typer(help="Notification commands")
 news_app = typer.Typer(help="AI news commands")
 streak_app = typer.Typer(help="Streak tracking commands")
 ideas_app = typer.Typer(help="Project idea generation commands")
+circleback_app = typer.Typer(help="Circle-back: earmark items to revisit later")
 quests_app = typer.Typer(help="Quest management commands")
 achievements_app = typer.Typer(help="Achievement tracking commands")
 routines_app = typer.Typer(help="Claude Code Routines migration commands")
@@ -30,6 +31,7 @@ app.add_typer(notify_app, name="notify")
 app.add_typer(news_app, name="news")
 app.add_typer(streak_app, name="streak")
 app.add_typer(ideas_app, name="ideas")
+app.add_typer(circleback_app, name="circleback")
 app.add_typer(quests_app, name="quests")
 app.add_typer(achievements_app, name="achievements")
 app.add_typer(routines_app, name="routines")
@@ -1834,6 +1836,239 @@ def ideas_sync(
         print(f"  File: {d['total_in_file']} ideas | Database: {d['total_in_db']} ideas")
 
     _output(result, json_output, _human)
+
+
+# ---------------------------------------------------------------------------
+# circleback subcommands
+# ---------------------------------------------------------------------------
+
+
+def _circleback_line(item: dict) -> str:
+    """Format a single circle-back item for human output."""
+    flag = {1: "!!", 2: " !", 3: "  "}.get(item.get("priority"), " !")
+    date_part = f"  (circle back {item['circle_back_date']})" if item.get(
+        "circle_back_date"
+    ) else ""
+    promoted = f"  -> {item['issue_url']}" if item.get("issue_url") else ""
+    return (
+        f"  {flag} #{item['id']}  [{item.get('kind', 'idea')}] "
+        f"{item['content']}{date_part}{promoted}"
+    )
+
+
+@circleback_app.command("add")
+def circleback_add(
+    content: str = typer.Argument(..., help="What to circle back to"),
+    kind: str = typer.Option(
+        "idea", "--kind", help="continue | project | idea"
+    ),
+    priority: str = typer.Option(
+        "medium", "--priority", help="high | medium | low"
+    ),
+    date: Optional[str] = typer.Option(
+        None, "--date", help="Snooze until this date (YYYY-MM-DD)"
+    ),
+    note: Optional[str] = typer.Option(None, "--note", help="Longer context"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Earmark an item to revisit later."""
+    from src.circleback import CircleBackError, CircleBackManager
+
+    cm = CircleBackManager()
+    try:
+        item = cm.add(
+            content, kind=kind, priority=priority, circle_back_date=date, note=note
+        )
+    except CircleBackError as exc:
+        if json_output:
+            print(json.dumps({"error": str(exc), "code": 2}))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(2)
+
+    data = {"item": item}
+
+    def _human(d):
+        print("Circle-back item added:")
+        print(_circleback_line(d["item"]))
+
+    _output(data, json_output, _human)
+
+
+@circleback_app.command("list")
+def circleback_list(
+    status: Optional[str] = typer.Option(
+        "open", "--status", help="open | done | promoted | dropped | all"
+    ),
+    kind: Optional[str] = typer.Option(None, "--kind", help="Filter by kind"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """List circle-back items (open ones by default)."""
+    from src.circleback import CircleBackManager
+
+    cm = CircleBackManager()
+    status_filter = None if status == "all" else status
+    items = cm.list_items(status=status_filter, kind=kind)
+
+    data = {"items": items}
+
+    def _human(d):
+        if not d["items"]:
+            print("No circle-back items.")
+            return
+        print(f"Circle-back items ({len(d['items'])}):\n")
+        for item in d["items"]:
+            print(_circleback_line(item))
+
+    _output(data, json_output, _human)
+
+
+@circleback_app.command("due")
+def circleback_due(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Show items that are due now (undated or past their circle-back date)."""
+    from src.circleback import CircleBackManager
+
+    cm = CircleBackManager()
+    due = cm.due_items()
+    upcoming = cm.upcoming_items()
+    data = {"due": due, "upcoming_count": len(upcoming)}
+
+    def _human(d):
+        if not d["due"]:
+            print("Nothing due to circle back to right now.")
+        else:
+            print(f"Due to circle back ({len(d['due'])}):\n")
+            for item in d["due"]:
+                print(_circleback_line(item))
+        if d["upcoming_count"]:
+            print(f"\n({d['upcoming_count']} more still snoozed.)")
+
+    _output(data, json_output, _human)
+
+
+@circleback_app.command("done")
+def circleback_done(
+    item_id: int = typer.Argument(..., help="Item ID to mark done"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Mark a circle-back item as done."""
+    _circleback_transition(item_id, "mark_done", "done", json_output)
+
+
+@circleback_app.command("drop")
+def circleback_drop(
+    item_id: int = typer.Argument(..., help="Item ID to drop"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Drop a circle-back item you no longer want to revisit."""
+    _circleback_transition(item_id, "drop", "dropped", json_output)
+
+
+def _circleback_transition(item_id, method, label, json_output):
+    from src.circleback import CircleBackManager
+
+    cm = CircleBackManager()
+    ok = getattr(cm, method)(item_id)
+    if not ok:
+        if json_output:
+            print(json.dumps({"error": "Item not found", "code": 2}))
+        else:
+            print(f"Circle-back item {item_id} not found.", file=sys.stderr)
+        raise typer.Exit(2)
+
+    data = {"id": item_id, "status": label}
+
+    def _human(d):
+        print(f"Circle-back item #{d['id']} marked {d['status']}.")
+
+    _output(data, json_output, _human)
+
+
+@circleback_app.command("snooze")
+def circleback_snooze(
+    item_id: int = typer.Argument(..., help="Item ID to snooze"),
+    date: str = typer.Argument(..., help="Circle back on this date (YYYY-MM-DD)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Push an item to a future date."""
+    from src.circleback import CircleBackError, CircleBackManager
+
+    cm = CircleBackManager()
+    try:
+        ok = cm.snooze(item_id, date)
+    except CircleBackError as exc:
+        if json_output:
+            print(json.dumps({"error": str(exc), "code": 2}))
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        raise typer.Exit(2)
+
+    if not ok:
+        if json_output:
+            print(json.dumps({"error": "Item not found", "code": 2}))
+        else:
+            print(f"Circle-back item {item_id} not found.", file=sys.stderr)
+        raise typer.Exit(2)
+
+    item = cm.get(item_id)
+    data = {"item": item}
+
+    def _human(d):
+        print(f"Circle-back item #{item_id} snoozed until {date}.")
+
+    _output(data, json_output, _human)
+
+
+@circleback_app.command("promote-to-issue")
+def circleback_promote_to_issue(
+    item_id: int = typer.Argument(..., help="Item ID to promote"),
+    repo: Optional[str] = typer.Option(
+        None, "--repo", help="Target repo owner/name (defaults to cwd repo)"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Create a GitHub issue from a circle-back item and mark it promoted."""
+    from src.circleback import CircleBackManager
+
+    cm = CircleBackManager()
+    result = cm.promote_to_issue(item_id, repo=repo)
+    if not result.get("ok"):
+        if json_output:
+            print(json.dumps({"error": result.get("error"), "code": 2}))
+        else:
+            print(f"Error: {result.get('error')}", file=sys.stderr)
+        raise typer.Exit(2)
+
+    def _human(d):
+        print(f"Circle-back item #{item_id} promoted to issue:")
+        print(f"  {d['issue_url']}")
+
+    _output(result, json_output, _human)
+
+
+@circleback_app.command("context")
+def circleback_context(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """Emit due circle-back items as priority context for the agent.
+
+    Intended for the nightly /newsandideas pipeline: run this first so the
+    agent sees what you've already flagged as important before proposing new
+    work.
+    """
+    from src.circleback import CircleBackManager
+
+    cm = CircleBackManager()
+    data = cm.build_agent_context()
+
+    def _human(d):
+        print(d["summary"])
+        for item in d["due"]:
+            print(_circleback_line(item))
+
+    _output(data, json_output, _human)
 
 
 # ---------------------------------------------------------------------------

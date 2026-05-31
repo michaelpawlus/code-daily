@@ -39,6 +39,14 @@ code-daily ideas list [--json] [--status TEXT]
 code-daily ideas add CONTENT [--json]
 code-daily ideas promote IDEA_ID [--json]
 code-daily ideas sync [--json]
+code-daily circleback add CONTENT [--kind TEXT] [--priority TEXT] [--date TEXT] [--note TEXT] [--json]
+code-daily circleback list [--json] [--status TEXT] [--kind TEXT]
+code-daily circleback due [--json]
+code-daily circleback done ITEM_ID [--json]
+code-daily circleback drop ITEM_ID [--json]
+code-daily circleback snooze ITEM_ID DATE [--json]
+code-daily circleback promote-to-issue ITEM_ID [--repo TEXT] [--json]
+code-daily circleback context [--json]
 code-daily quests list [--json] [--status TEXT] [--limit INT]
 code-daily quests add TITLE [--json] [--description TEXT]
 code-daily quests accept QUEST_ID [--json]
@@ -204,6 +212,50 @@ Returns a dict with `audit_path`, `audit_absolute_path` (paste-friendly),
 `linked_projects` (everything backlinked this run), and `new_stubs` (hubs
 created this run — surface these to the user so they know what's new).
 Logic lives in `src/codebase_audit.py`.
+
+## Circle-Back: Earmarking Items to Revisit
+
+`code-daily circleback` is a lightweight backlog for things you want to come
+back to but can't act on right now — work you started and mean to continue,
+new project ideas worth retaining, or anything surfaced during a
+`/newsandideas` run that deserves more than a fleeting mention. It is
+deliberately distinct from its two neighbours:
+
+- **`quests`** is the prioritized *work queue* fed by automated discovery sources.
+- **`ideas`** is the IDEAS.md-backed running list of coding ideas.
+
+Circle-back adds two things neither has: an optional **snooze-until date**
+(`circle_back_date`) so an item stays quiet until it's due, and an explicit
+**priority** (`high`/`medium`/`low`) that signals to the agent what *you* think
+is important. Each item has a **kind** (`continue`, `project`, or `idea`) and a
+lifecycle of `open → done | dropped | promoted`.
+
+Items live in the `circleback_items` table; logic is in `src/circleback.py`
+(`CircleBackManager`). `circleback add` dedupes on `(source, source_ref)` so
+automated capture is safe to re-run. `circleback due` shows only items that are
+actionable now (undated, or past their snooze date); the rest stay hidden until
+they come due. `circleback promote-to-issue` creates a real GitHub issue via
+`gh issue create` (see `gh_issues.create_issue`), records the URL, and marks the
+item `promoted` — the bridge for when an earmark is finally ready to act on.
+
+### newsandideas integration
+
+The nightly `/newsandideas` pipeline should bracket its run with circle-back:
+
+1. **Start of run — load priorities.** Run `code-daily circleback context --json`
+   and feed the result to the agent as "what the user has already flagged as
+   important." The payload groups due items by kind, counts high-priority items,
+   and reports how many are still snoozed, so new suggestions can defer to or
+   build on the existing backlog instead of duplicating it.
+2. **End of run — capture overflow.** When a session surfaces more good work
+   than fits in one day, earmark the rest rather than dropping it:
+   `code-daily circleback add "<thing>" --kind <continue|project|idea> --priority high [--date YYYY-MM-DD]`.
+   Use `--source newsandideas` style refs only via the Python API
+   (`CircleBackManager.add(..., source="newsandideas", source_ref=...)`) when you
+   need dedup across runs.
+
+This closes the loop: each run reads back the priorities the user set, and the
+overflow from a run becomes the seed for the next one.
 
 ## Agent Workflow: Themed News Digest
 

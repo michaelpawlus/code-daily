@@ -104,6 +104,53 @@ def search_issues(query: str, limit: int = 20) -> list[GhIssue]:
     return _run_gh(cmd)
 
 
+def create_issue(
+    title: str,
+    body: str = "",
+    repo: str | None = None,
+    labels: list[str] | None = None,
+) -> dict:
+    """Create a GitHub issue via the `gh` CLI.
+
+    Args:
+        title: Issue title.
+        body: Issue body (markdown).
+        repo: Target repo (owner/name). Defaults to the repo in the cwd.
+        labels: Optional labels to apply.
+
+    Returns:
+        dict with 'created' bool, and on success 'url' (the new issue URL),
+        or on failure 'error' with a message.
+    """
+    cmd = ["gh", "issue", "create", "--title", title, "--body", body]
+    if repo:
+        cmd.extend(["-R", repo])
+    if labels:
+        cmd.extend(["--label", ",".join(labels)])
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30
+        )
+    except FileNotFoundError:
+        return {
+            "created": False,
+            "error": "gh CLI not found. Install from https://cli.github.com/",
+        }
+    except subprocess.TimeoutExpired:
+        return {"created": False, "error": "gh issue create timed out"}
+
+    if result.returncode != 0:
+        return {
+            "created": False,
+            "error": result.stderr.strip() or "gh issue create failed",
+        }
+
+    # gh prints the new issue URL to stdout.
+    url = result.stdout.strip().splitlines()[-1].strip() if result.stdout.strip() else ""
+    return {"created": True, "url": url}
+
+
 def _run_gh(cmd: list[str]) -> list[GhIssue]:
     """Run a gh command and parse the JSON output into GhIssue objects."""
     try:
